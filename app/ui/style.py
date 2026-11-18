@@ -93,6 +93,26 @@ QLineEdit, QTextBrowser {{
 }}
 QFrame#card {{ background: {PANEL}; border-radius: 8px; }}
 QFrame#card QLabel, QFrame#card QRadioButton, QFrame#card QCheckBox {{ background: transparent; }}
+QWidget#startPage QLabel {{ background: transparent; }}
+QWidget#startPage QPushButton#link {{ background: transparent; }}
+QFrame#recent {{
+    background: {PANEL_2};
+    border: 1px solid transparent;
+    border-radius: 6px;
+}}
+QFrame#recent:hover {{ border-color: {RED}; }}
+QFrame#recent QLabel, QFrame#recent QPushButton {{ background: transparent; }}
+QSlider::groove:horizontal {{ height: 4px; background: {PANEL_2}; border-radius: 2px; }}
+QSlider::sub-page:horizontal {{ background: {RED}; border-radius: 2px; }}
+QSlider::handle:horizontal {{
+    background: {TEXT}; width: 14px; margin: -6px 0; border-radius: 7px;
+}}
+QComboBox {{
+    background: {PANEL_2};
+    border: 1px solid #33475a;
+    border-radius: 6px;
+    padding: 6px 10px;
+}}
 QProgressBar {{
     background: {PANEL};
     border: none;

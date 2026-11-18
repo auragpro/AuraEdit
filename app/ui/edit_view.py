@@ -9,9 +9,10 @@ from .tabs.home_tab import HomeTab
 from .tabs.intro_tab import IntroTab
 from .tabs.kunai_tab import KunaiTab
 from .tabs.music_tab import MusicTab
+from .tabs.sounds_tab import SoundsTab
 
 TABS = [("Accueil", HomeTab), ("Intro", IntroTab), ("Musique", MusicTab),
-        ("Clips", ClipsTab), ("Kunais Jett", KunaiTab)]
+        ("Clips", ClipsTab), ("Sons IA", SoundsTab), ("Kunais Jett", KunaiTab)]
 
 
 class EditView(QWidget):

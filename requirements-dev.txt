@@ -1,6 +1,6 @@
 -r requirements.txt
 pyinstaller>=6.9
+pillow
 # pour la future détection des kills :
-numpy
 scipy
 opencv-python

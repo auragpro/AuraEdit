@@ -6,6 +6,7 @@ from PyQt6.QtWidgets import (QLabel, QMainWindow, QMessageBox, QProgressBar, QSt
                              QVBoxLayout, QWidget)
 
 from app.core import project as proj
+from version import __version__
 
 from .edit_view import EditView
 from .start_page import StartPage
@@ -42,6 +43,7 @@ class MainWindow(QMainWindow):
         self.start_page = StartPage()
         self.start_page.new_edit.connect(self.new_edit)
         self.start_page.open_project.connect(self.open_project)
+        self.start_page.check_updates.connect(self.manual_update_check)
         self.stack.addWidget(self.loading)
         self.stack.addWidget(self.start_page)
         self.setCentralWidget(self.stack)
@@ -56,6 +58,17 @@ class MainWindow(QMainWindow):
         self.check_thread = UpdateCheckThread(self)
         self.check_thread.found.connect(self.on_update_found)
         self.check_thread.nothing.connect(self.show_start)
+        self.check_thread.start()
+
+    def manual_update_check(self):
+        """Bouton « Vérifier les mises à jour » de la page de démarrage."""
+        if self.check_thread is not None and self.check_thread.isRunning():
+            return
+        self.check_thread = UpdateCheckThread(self)
+        self.check_thread.found.connect(lambda info: UpdateDialog(info, self).exec())
+        self.check_thread.nothing.connect(lambda: QMessageBox.information(
+            self, "Mises à jour", f"Tu as la dernière version d'AuraEdit ({__version__}).\n"
+                                  "(Ou pas de connexion internet pour vérifier.)"))
         self.check_thread.start()
 
     def on_update_found(self, info):

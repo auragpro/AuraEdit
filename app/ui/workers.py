@@ -69,3 +69,46 @@ class ScanThread(QThread):
         except Exception:
             result = []
         self.done.emit(result)
+
+
+class AnalyzeThread(QThread):
+    """Analyse la musique (tempo, beats, drops, voix, paroles)."""
+    done = pyqtSignal(object)       # music_analysis.Analysis
+    failed = pyqtSignal(str)
+
+    def __init__(self, music, lrc_path=None, keywords=(), forced_tempo=None, parent=None):
+        super().__init__(parent)
+        self.music, self.lrc_path, self.keywords, self.forced_tempo = music, lrc_path, keywords, forced_tempo
+
+    def run(self):
+        from app.core import audio, music_analysis
+        try:
+            y = audio.load(self.music, music_analysis.SR, 1)
+            lrc = None
+            if self.lrc_path:
+                try:
+                    with open(self.lrc_path, encoding="utf-8-sig", errors="replace") as f:
+                        lrc = f.read()
+                except OSError:
+                    lrc = None
+            self.done.emit(music_analysis.analyze(y, lrc, self.keywords, self.forced_tempo))
+        except Exception as e:
+            self.failed.emit(str(e))
+
+
+class RenderThread(QThread):
+    """Mixe la musique et les sons dans des fichiers WAV."""
+    done = pyqtSignal(str, str)     # chemin mix, chemin sons seuls
+    failed = pyqtSignal(str)
+
+    def __init__(self, music, placements, out_mix, out_sfx, parent=None):
+        super().__init__(parent)
+        self.music, self.placements, self.out_mix, self.out_sfx = music, placements, out_mix, out_sfx
+
+    def run(self):
+        from app.core import sound_ai
+        try:
+            sound_ai.render(self.music, self.placements, self.out_mix, self.out_sfx)
+            self.done.emit(str(self.out_mix), str(self.out_sfx or ""))
+        except Exception as e:
+            self.failed.emit(str(e))

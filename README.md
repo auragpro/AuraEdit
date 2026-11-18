@@ -2,9 +2,20 @@
 
 Logiciel qui fabrique tes edits Valorant : intro + musique + clips + kunais de Jett → MP4.
 
-**Version 0.1.0** : mises à jour automatiques, page de démarrage, mode édition avec les 5 onglets
-(choix des fichiers, ordre des clips, réglages des kunais, sauvegarde automatique).
-La génération de la vidéo arrive à la prochaine étape.
+**Version 0.2.0** : mises à jour automatiques, page de démarrage, 6 onglets (Accueil, Intro, Musique,
+Clips, Sons IA, Kunais Jett) avec sauvegarde automatique. La génération de la vidéo arrive ensuite.
+
+## Onglet Sons IA
+
+1. Range tes sons dans un dossier, idéalement en sous-dossiers : `Vandal`, `Sheriff`, `Woosh`,
+   `Impact`, `Riser`... (l'IA reconnaît la catégorie dans le nom du dossier ou du fichier).
+2. Choisis la musique (onglet Musique), le dossier de sons, et si tu veux un fichier de paroles
+   `.lrc` + des mots-clés (ex. `bang, tire`) : un son sera calé sur ces mots.
+3. « Analyser et générer » : tempo, beats, temps forts, drops et attaques de voix sont détectés,
+   puis l'IA place les sons. Mauvais tempo ? Boutons ÷2 / ×2.
+4. Corrige : supprimer, changer de son, double-clic sur la timeline pour ajouter. Puis
+   **« Valider : l'IA apprend »**. Chaque choix entraîne l'IA (fichier `%APPDATA%\AuraEdit\sons_ia_modele.json`).
+5. « Écouter l'aperçu » ou « Exporter les WAV » (musique + sons, et sons seuls pour ton logiciel de montage).
 
 ## Lancer le logiciel (depuis le code)
 

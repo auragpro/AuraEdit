@@ -47,7 +47,7 @@ def main():
     updater.cleanup_leftovers()          # supprime l'ancienne version après une MAJ
     set_windows_app_id()
     app = QApplication(sys.argv)
-    app.setWindowIcon(QIcon(asset("logo.ico")))
+    app.setWindowIcon(QIcon(asset("logo.png")))
     app.setApplicationName(APP_NAME)
     app.setApplicationVersion(__version__)
     app.setStyleSheet(STYLESHEET)

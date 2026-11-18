@@ -46,6 +46,12 @@ class KunaiSettings:
     videos: list[str] = field(default_factory=list)   # vidéos de kills avec Jett
 
 
+def default_sons():
+    """Réglages de l'onglet Sons IA."""
+    return {"dossier": None, "paroles": None, "mots_cles": "", "densite": 0.5, "creativite": 0.3,
+            "drops": True, "temps": True, "voix": True, "tempo_force": None, "placements": []}
+
+
 @dataclass
 class Project:
     name: str
@@ -55,6 +61,7 @@ class Project:
     music: str | None = None
     clips: list[str] = field(default_factory=list)     # dans l'ordre de l'edit
     kunai: KunaiSettings = field(default_factory=KunaiSettings)
+    sons: dict = field(default_factory=default_sons)
     path: str | None = None                             # fichier .auraedit (non sauvegardé dedans)
 
     @classmethod
@@ -102,15 +109,18 @@ class Project:
             kunai=KunaiSettings(enabled=bool(kunai.get("enabled", True)),
                                 position=pos if pos in KUNAI_POSITIONS else "les deux",
                                 videos=[str(v) for v in kunai.get("videos") or []]),
+            sons={**default_sons(), **(data.get("sons") if isinstance(data.get("sons"), dict) else {})},
             path=str(path),
         )
+        if not isinstance(p.sons.get("placements"), list):
+            p.sons["placements"] = []
         add_recent(path)
         return p
 
     # -- état
     def missing_files(self):
         """Fichiers du projet qui n'existent plus sur le PC (déplacés, supprimés...)."""
-        files = [self.intro, self.outro, self.music, *self.clips, *self.kunai.videos]
+        files = [self.intro, self.outro, self.music, *self.clips, *self.kunai.videos, self.sons.get("paroles")]
         return [f for f in files if f and not Path(f).is_file()]
 
     def checklist(self):
@@ -120,6 +130,7 @@ class Project:
             ("Musique", bool(self.music)),
             (f"Clips ({len(self.clips)})", bool(self.clips)),
             ("Kunais Jett", (not self.kunai.enabled) or bool(self.kunai.videos)),
+            (f"Sons IA ({len(self.sons.get('placements', []))})", bool(self.sons.get("placements"))),
         ]
 
 
@@ -147,6 +158,22 @@ def add_recent(path):
                                    encoding="utf-8")
     except OSError:
         pass
+
+
+def project_info(path):
+    """Résumé léger d'un projet pour la page de démarrage (sans tout charger)."""
+    p = Path(path)
+    try:
+        d = json.loads(p.read_text(encoding="utf-8"))
+        mtime = p.stat().st_mtime
+    except (OSError, ValueError):
+        return None
+    if not isinstance(d, dict):
+        return None
+    music = d.get("music")
+    return {"path": str(p), "name": str(d.get("name") or p.stem), "modified": mtime,
+            "clips": len(d.get("clips") or []), "music": Path(music).stem if music else None,
+            "sons": len((d.get("sons") or {}).get("placements") or [])}
 
 
 def remove_recent(path):
