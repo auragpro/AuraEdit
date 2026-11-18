@@ -211,6 +211,10 @@ class SoundsTab(QWidget):
         ll.addLayout(tr)
         ll.addWidget(self.btn_generate)
         ll.addWidget(self.btn_regen)
+        self.btn_learn_edit = QPushButton("Apprendre d'un edit déjà fait...")
+        self.btn_learn_edit.setToolTip("L'IA écoute un de tes edits finis et copie ta façon de placer les sons")
+        self.btn_learn_edit.clicked.connect(self.learn_from_edit)
+        ll.addWidget(self.btn_learn_edit)
 
         # ---------- timeline + liste (droite)
         self.timeline = Timeline()
@@ -545,6 +549,19 @@ class SoundsTab(QWidget):
             self.ai.learn_keep(p)
         self._after_learning(self.selected_id())
         self.status.setText("Merci ! L'IA a retenu tes choix pour les prochains edits.")
+
+    def learn_from_edit(self):
+        from ..learn_edit_dialog import LearnFromEditDialog
+        if not self.library:
+            QMessageBox.information(self, "Sons IA", "Choisis d'abord ton dossier de sons : l'IA s'en sert "
+                                                     "pour reconnaître les sons de ton edit.")
+            return
+        self.edit_dialog = LearnFromEditDialog(self.ai, self.library, self.project.music, open_file, self)
+        self.edit_dialog.exec()
+        kept, _ = self.edit_dialog.learned
+        if kept:
+            self.status.setText(f"L'IA a appris de ton edit ({kept} sons). Clique « Autre version » pour voir le résultat.")
+        self.refresh(self.selected_id())
 
     def reset_ai(self):
         answer = QMessageBox.question(self, "Réinitialiser l'IA",

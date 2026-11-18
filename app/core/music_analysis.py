@@ -62,8 +62,8 @@ def _pad(y):
     return np.pad(y, (N_FFT // 2, N_FFT // 2 + HOP))
 
 
-def band_spectrogram(y):
-    """Spectrogramme en N_BANDS bandes logarithmiques (30 Hz -> 11 kHz), en log."""
+def band_spectrogram(y, linear=False):
+    """Spectrogramme en N_BANDS bandes logarithmiques (30 Hz -> 11 kHz), en log (ou linéaire)."""
     n, idx = _frames(y)
     y = _pad(y)
     win = np.hanning(N_FFT).astype(np.float32)
@@ -84,6 +84,8 @@ def band_spectrogram(y):
                 acc[:, b] = mag[:, m].sum(1)
         out[start:start + len(sl)] = acc / counts
     centers = np.sqrt(edges[:-1] * edges[1:])
+    if linear:
+        return out, centers
     return np.log1p(100 * out), centers
 
 

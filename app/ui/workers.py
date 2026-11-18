@@ -112,3 +112,23 @@ class RenderThread(QThread):
             self.done.emit(str(self.out_mix), str(self.out_sfx or ""))
         except Exception as e:
             self.failed.emit(str(e))
+
+
+class ListenThread(QThread):
+    """L'IA écoute un edit déjà fait et retrouve les sound kills."""
+    progress = pyqtSignal(str, float)
+    done = pyqtSignal(object)       # edit_learning.EditExample
+    failed = pyqtSignal(str)
+
+    def __init__(self, edit, music, library, parent=None):
+        super().__init__(parent)
+        self.edit, self.music, self.library = edit, music, list(library)
+
+    def run(self):
+        from app.core import edit_learning
+        try:
+            ex = edit_learning.listen(self.edit, self.music, self.library,
+                                      progress=lambda txt, f: self.progress.emit(txt, float(f)))
+            self.done.emit(ex)
+        except Exception as e:
+            self.failed.emit(str(e))

@@ -17,6 +17,18 @@ Clips, Sons IA, Kunais Jett) avec sauvegarde automatique. La génération de la 
    **« Valider : l'IA apprend »**. Chaque choix entraîne l'IA (fichier `%APPDATA%\AuraEdit\sons_ia_modele.json`).
 5. « Écouter l'aperçu » ou « Exporter les WAV » (musique + sons, et sons seuls pour ton logiciel de montage).
 
+### Apprendre d'un edit déjà fait
+
+« Apprendre d'un edit déjà fait... » : donne un edit fini (mp4 ou audio) **et sa musique d'origine**.
+L'IA cale la musique dans l'edit (intro avant, morceau commencé plus loin, volume changé : OK),
+retire la musique, puis reconnaît chacun des sons de ton dossier dans ce qui reste. Elle replace
+chaque son dans la musique (drop, temps fort, caisse claire, voix...) et apprend aussi les moments
+où tu n'as rien mis. Tu peux décocher les détections fausses avant de cliquer « Apprendre ».
+
+Limites : les sons doivent être les mêmes fichiers que ceux de ton dossier ; la musique doit être
+utilisée en un seul morceau continu (pas recoupée ni accélérée) ; un son posé exactement sur une
+grosse caisse très forte peut être raté.
+
 ## Lancer le logiciel (depuis le code)
 
 1. Installe Python 3.10+ (coche *Add Python to PATH*).

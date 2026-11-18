@@ -13,9 +13,9 @@ from version import __version__
 from .style import RED, asset
 
 WHATS_NEW = [
-    "Nouvel onglet Sons IA : sound kills placés sur les beats, drops, voix et paroles",
-    "L'IA apprend de tes choix à chaque edit",
-    "Nouvel écran de démarrage et ton logo",
+    "Sons IA : l'IA écoute un de tes edits finis et copie ta façon de placer les sound kills",
+    "Elle retrouve chaque son de ton dossier dans l'edit (même avec une intro avant la musique)",
+    "Tu vérifies la liste, tu décoches ce qui est faux, et elle apprend",
 ]
 
 
