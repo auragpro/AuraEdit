@@ -95,7 +95,8 @@ def category_of(path, root=None):
 def scan_library(folder, limit=3000):
     folder = Path(folder)
     sounds = []
-    for dirpath, _, files in os.walk(folder):
+    for dirpath, dirnames, files in os.walk(folder):
+        dirnames.sort()                                   # même ordre sur Windows et ailleurs
         for f in sorted(files):
             if Path(f).suffix.lower() in AUDIO_EXT:
                 p = Path(dirpath) / f
