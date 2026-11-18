@@ -1,0 +1,70 @@
+# Fabrique AuraEdit.exe sur une machine Windows de GitHub et le publie dans une Release.
+# Deux façons de lancer :
+#   - onglet Actions > « Publier une version » > Run workflow   (le plus simple)
+#   - ou pousser un tag de version (git tag v0.2.0 && git push origin v0.2.0)
+# Les AuraEdit déjà installés détectent la nouvelle version au prochain lancement.
+name: Publier une version
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+    branches: [main]
+    paths: ["projet.b64"]      # envoi du projet empaqueté depuis le navigateur
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Déballer projet.b64 (s'il existe) et l'enregistrer dans le dépôt
+        shell: bash
+        run: |
+          if [ -f projet.b64 ]; then
+            base64 -d projet.b64 | tar -xz
+            git rm -q projet.b64
+            git config user.name "github-actions[bot]"
+            git config user.email "41898333+github-actions[bot]@users.noreply.github.com"
+            git add -A
+            git commit -q -m "Ajout du code d'AuraEdit"
+            git push
+          fi
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Lire la version dans version.py
+        id: version
+        shell: python
+        run: |
+          import os, re, sys
+          code = open("version.py", encoding="utf-8").read()
+          version = re.search(r'__version__ = "([^"]+)"', code).group(1)
+          ref = os.environ["GITHUB_REF"]
+          if ref.startswith("refs/tags/") and ref[len("refs/tags/v"):] != version:
+              sys.exit(f"Le tag {ref} ne correspond pas à version.py ({version}). Corrige version.py.")
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write(f"tag=v{version}\n")
+
+      - name: Installer
+        run: python -m pip install -r requirements.txt "pyinstaller>=6.9"
+
+      - name: Tests
+        run: python -m unittest discover tests
+
+      - name: Fabriquer AuraEdit.exe
+        run: python -m PyInstaller --noconfirm --clean --onefile --windowed --name AuraEdit --icon app/assets/logo.ico --add-data "app/assets;app/assets" main.py
+
+      - name: Publier la Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: AuraEdit ${{ steps.version.outputs.tag }}
+          files: dist/AuraEdit.exe
+          target_commitish: ${{ github.ref_name == 'main' && 'main' || github.sha }}
+          generate_release_notes: true
