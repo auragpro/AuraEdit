@@ -64,11 +64,28 @@ jobs:
       - name: Fabriquer AuraEdit.exe
         run: python -m PyInstaller --noconfirm --clean --onefile --windowed --name AuraEdit --icon app/assets/logo.png --add-data "app/assets;app/assets" --collect-all imageio_ffmpeg main.py
 
+      - name: Fabriquer le paquet de code (MAJ légère, sans retélécharger l'exe)
+        id: code
+        shell: python
+        run: |
+          import os, re, zipfile, pathlib
+          base = re.search(r"BASE = (\d+)", open("version.py", encoding="utf-8").read()).group(1)
+          name = f"AuraEdit-code-base{base}.zip"
+          with zipfile.ZipFile(name, "w", zipfile.ZIP_DEFLATED) as z:
+              z.write("version.py")
+              for p in sorted(pathlib.Path("app").rglob("*")):
+                  if p.is_file() and "__pycache__" not in p.parts:
+                      z.write(p, p.as_posix())
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write(f"zip={name}\n")
+
       - name: Publier la Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.version.outputs.tag }}
           name: AuraEdit ${{ steps.version.outputs.tag }}
-          files: dist/AuraEdit.exe
+          files: |
+            dist/AuraEdit.exe
+            ${{ steps.code.outputs.zip }}
           target_commitish: ${{ github.ref_name == 'main' && 'main' || github.sha }}
           body_path: NOUVEAUTES.md        # les nouveautés écrites à la main (affichées dans la popup)
