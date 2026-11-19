@@ -34,13 +34,16 @@ DEFAULTS = {
     "mode_v2": False,          # passage automatique au Pixel Motion (une seule fois)
     "couteaux": {},            # {nom: {"image": chemin, "duree": secondes entre début et fin}}
     "kunai_reglages": {},      # réglages propres aux kunais (courbes, durées, blending, durée apprise)
-    "courbes_perso": [],       # courbes enregistrées : [{"nom", "c1", "c2"}]
+    "courbes_perso": [],
+    "dashback_reglages": {},   # réglages propres aux dash back
+    "dismiss_reglages": {},    # réglages propres aux dismiss       # courbes enregistrées : [{"nom", "c1", "c2"}]
 }
 COURBES_BASE = [
     {"nom": "Par défaut", "c1": [0.39, 0.59, 0.26, 1.0], "c2": [0.33, 0.0, 0.74, 0.8]},
     {"nom": "Linéaire", "c1": [0.0, 0.0, 1.0, 1.0], "c2": [0.0, 0.0, 1.0, 1.0]},
     {"nom": "Doux", "c1": [0.33, 0.0, 0.67, 1.0], "c2": [0.33, 0.0, 0.67, 1.0]},
 ]
+HAND_TYPES = ("kunai", "dashback", "dismiss")     # time remap « main » : part au kill, durée retenue
 KUNAI_KEYS = ("courbe1", "courbe2", "duree_ralenti", "frames_retour", "blending", "blending_mode")
 
 
@@ -71,8 +74,8 @@ def cfg_for(data, cfg=None):
     """Réglages à utiliser pour un time remap : ceux des kunais si c'est un kunai."""
     base = cfg or load()
     merged = dict(base)
-    if isinstance(data, dict) and data.get("type") == "kunai":
-        k = base.get("kunai_reglages") or {}
+    if isinstance(data, dict) and data.get("type") in HAND_TYPES:
+        k = base.get(f"{data['type']}_reglages") or {}
         merged.update({key: k[key] for key in KUNAI_KEYS if key in k})
     if isinstance(data, dict):                     # réglages propres à ce clip (s'il en a)
         if data.get("ralenti"):
@@ -82,14 +85,14 @@ def cfg_for(data, cfg=None):
     return merged
 
 
-def save_kunai(merged):
-    """Garde les réglages kunai (pris dans un cfg fusionné) sans toucher à ceux des clips."""
+def save_kunai(merged, kind="kunai"):
+    """Garde les réglages kunai / dash back / dismiss (pris dans un cfg fusionné) sans toucher à ceux des clips."""
     base = load()
-    k = dict(base.get("kunai_reglages") or {})
+    k = dict(base.get(f"{kind}_reglages") or {})
     k.update({key: merged[key] for key in KUNAI_KEYS if key in merged})
     if merged.get("duree_kunai"):
         k["duree"] = merged["duree_kunai"]
-    base["kunai_reglages"] = k
+    base[f"{kind}_reglages"] = k
     save(base)
 
 

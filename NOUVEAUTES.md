@@ -1,3 +1,11 @@
+## Nouveautés de la version 0.7.8
+
+- **Time remap sur les Dash back et les Dismiss**, comme sur les kunais.
+  - Dans leur partie de **Montage**, sélectionne des vidéos et clique **« ⏱ Time remap... »**, ou double-clique une vidéo.
+  - Tu peux aussi le lancer depuis l'ordre de l'edit dans **Clips**.
+  - Chaque type garde **ses propres réglages** : courbes, durées et durée apprise.
+  - Les vidéos réglées ont un ⏱, et le time remap est appliqué au rendu.
+
 ## Nouveautés de la version 0.7.7
 
 - **Nouvelles parties dans Montage : « ↩ Dash back » et « 🌀 Dismiss »**.

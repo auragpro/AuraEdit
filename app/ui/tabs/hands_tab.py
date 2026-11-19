@@ -89,9 +89,9 @@ class HandsTab(QWidget):
             b_remove = QPushButton("Retirer")
             b_add.clicked.connect(lambda _=False, sd=side: self.add_videos(sd))
             b_remove.clicked.connect(lambda _=False, sd=side: self.remove_selected(sd))
-            if self.ATTR == "kunai":
+            if self.ATTR in ("kunai", "dashback", "dismiss"):
                 b_remap = QPushButton("⏱ Time remap...")
-                b_remap.setToolTip("Régler le time remap des kunais sélectionnés (double-clic aussi).")
+                b_remap.setToolTip("Régler le time remap des vidéos sélectionnées (double-clic aussi).")
                 b_remap.clicked.connect(lambda _=False, sd=side: self.remap_selected(sd))
                 lst.itemDoubleClicked.connect(lambda it: self.open_remap([it.data(ROLE)]))
             count = QLabel()
@@ -107,7 +107,7 @@ class HandsTab(QWidget):
             row = QHBoxLayout()
             row.addWidget(b_add)
             row.addWidget(b_remove)
-            if self.ATTR == "kunai":
+            if self.ATTR in ("kunai", "dashback", "dismiss"):
                 row.addWidget(b_remap)
             cl.addLayout(row)
             cl.addWidget(count)
@@ -131,7 +131,7 @@ class HandsTab(QWidget):
 
     def _item(self, path):
         p = Path(path)
-        mark = "⏱ " if self.ATTR == "kunai" and str(path) in self.project.remaps else ""
+        mark = "⏱ " if self.ATTR in ("kunai", "dashback", "dismiss") and str(path) in self.project.remaps else ""
         item = QListWidgetItem(mark + (p.name if p.is_file() else f"⚠ {p.name} (introuvable)"))
         item.setData(ROLE, str(path))
         item.setToolTip(str(path))
@@ -170,7 +170,7 @@ class HandsTab(QWidget):
     def open_remap(self, paths):
         from ..timeremap_dialog import TimeRemapDialog
         for p in paths:
-            dlg = TimeRemapDialog(self.project, p, None, (), self, mode="kunai")
+            dlg = TimeRemapDialog(self.project, p, None, (), self, mode=self.ATTR)
             dlg.exec()
             if dlg.skip_all:
                 break
@@ -185,7 +185,7 @@ class HandsTab(QWidget):
 
     def showEvent(self, e):
         super().showEvent(e)
-        if self.ATTR == "kunai":
+        if self.ATTR in ("kunai", "dashback", "dismiss"):
             try:
                 from app.core import timeremap as tr
                 saved = tr.clip_remaps()

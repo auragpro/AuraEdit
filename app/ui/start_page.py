@@ -13,9 +13,9 @@ from version import __version__
 from .style import RED, asset
 
 WHATS_NEW = [
-    "Nouvelles parties : Dash back et Dismiss",
-    "Dash, Kunai, Dash back et Dismiss dans « Mes clips »",
-    "Ces catégories sont proposées dans « Reproduire un edit »"]
+    "Time remap sur les Dash back et les Dismiss",
+    "Réglages séparés pour chaque type (comme les kunais)",
+    "Bouton « ⏱ Time remap... » dans leur partie de Montage"]
 
 
 def ago(ts):

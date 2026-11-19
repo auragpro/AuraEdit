@@ -730,10 +730,11 @@ class ClipsTab(QWidget):
         """Ouvre la page Time remap pour chaque clip (couteau, keyframes, courbes)."""
         from ..timeremap_dialog import TimeRemapDialog
         for p in paths:
-            if p in self.project.dash.videos or p in self.project.dashback.videos or p in self.project.dismiss.videos:
+            if p in self.project.dash.videos:
                 continue
-            if p in self.project.kunai.videos:
-                dlg = TimeRemapDialog(self.project, p, None, (), self, mode="kunai")
+            kind = next((a for a in ("kunai", "dashback", "dismiss") if p in getattr(self.project, a).videos), None)
+            if kind:
+                dlg = TimeRemapDialog(self.project, p, None, (), self, mode=kind)
             else:
                 dlg = TimeRemapDialog(self.project, p, self._knife_of(p), list(self.folders), self)
             dlg.exec()
