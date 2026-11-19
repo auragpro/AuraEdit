@@ -7,7 +7,7 @@
 from pathlib import Path
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import (QDialog, QHBoxLayout, QLabel, QListWidget, QListWidgetItem,
+from PyQt6.QtWidgets import (QDialog, QHBoxLayout, QInputDialog, QLabel, QListWidget, QListWidgetItem,
                              QMessageBox, QProgressBar, QPushButton, QVBoxLayout)
 
 from app.core import edit_learning as el
@@ -63,6 +63,9 @@ class LearnFromEditDialog(QDialog):
         self.list.itemDoubleClicked.connect(self._play_item)
         self.btn_play = QPushButton("Écouter ce son")
         self.btn_play.clicked.connect(lambda: self._play_item(self._current()))
+        self.btn_fix = QPushButton("Corriger ce son...")
+        self.btn_fix.setToolTip("L'IA s'est trompée ? Choisis le bon sound kill à cet endroit")
+        self.btn_fix.clicked.connect(self.fix_item)
         self.btn_all = QPushButton("Tout cocher")
         self.btn_all.clicked.connect(lambda: self._check_all(True))
         self.btn_learn = QPushButton("Apprendre")
@@ -73,6 +76,7 @@ class LearnFromEditDialog(QDialog):
 
         row = QHBoxLayout()
         row.addWidget(self.btn_play)
+        row.addWidget(self.btn_fix)
         row.addWidget(self.btn_all)
         row.addStretch(1)
         row.addWidget(b_close)
@@ -98,7 +102,7 @@ class LearnFromEditDialog(QDialog):
         running = self.thread is not None
         self.btn_listen.setEnabled(ok and not running)
         has = self.example is not None and self.list.count() > 0
-        for b in (self.btn_learn, self.btn_play, self.btn_all):
+        for b in (self.btn_learn, self.btn_play, self.btn_fix, self.btn_all):
             b.setEnabled(has and not running)
 
     def listen(self):
@@ -146,17 +150,43 @@ class LearnFromEditDialog(QDialog):
         else:
             self.status.setText(f"{len(dets)} sound kill(s) retrouvé(s) — {resume}.\n"
                                 f"Musique calée ({where}, morceau utilisé de {fmt(example.start)} à {fmt(example.end)}). "
-                                "Décoche ceux qui sont faux (double-clic pour écouter), puis « Apprendre ».")
+                                "Double-clic pour écouter. Mauvais son ? « Corriger ce son... ». Pas de son du tout ? Décoche-le. Puis « Apprendre ».")
         for i, d in enumerate(dets):
-            sure = "sûr" if d.score >= el.MATCH_THRESHOLD else "à vérifier"
-            text = (f"{fmt(d.t_edit)}   {sa.LABELS.get(d.category, d.category)} — {Path(d.sound).name}"
-                    f"   ·  {ROLE_NAMES.get(d.role, d.role)}   ·  {sure} ({int(round(d.score * 100))} %)")
-            it = QListWidgetItem(text)
+            it = QListWidgetItem(self._text(d))
             it.setFlags(it.flags() | Qt.ItemFlag.ItemIsUserCheckable)
             it.setCheckState(Qt.CheckState.Checked if d.keep else Qt.CheckState.Unchecked)
             it.setData(ROLE, i)
             self.list.addItem(it)
         self.btn_learn.setText(f"Apprendre ({len(dets)} sons)" if dets else "Apprendre")
+
+    @staticmethod
+    def _text(d):
+        if d.score >= 1.0 and getattr(d, "fixed", False):
+            sure = "corrigé par toi"
+        else:
+            sure = ("sûr" if d.score >= el.MATCH_THRESHOLD else "à vérifier") + f" ({int(round(d.score * 100))} %)"
+        return (f"{fmt(d.t_edit)}   {sa.LABELS.get(d.category, d.category)} — {Path(d.sound).name}"
+                f"   ·  {ROLE_NAMES.get(d.role, d.role)}   ·  {sure}")
+
+    def fix_item(self):
+        it = self._current()
+        if it is None or self.example is None:
+            QMessageBox.information(self, "Corriger", "Sélectionne d'abord un son dans la liste.")
+            return
+        d = self.example.detections[it.data(ROLE)]
+        names = [Path(s.path).name for s in self.library]
+        cur = names.index(Path(d.sound).name) if Path(d.sound).name in names else 0
+        name, ok = QInputDialog.getItem(self, "Corriger ce son",
+                                        f"À {fmt(d.t_edit)}, le vrai sound kill était :", names, cur, False)
+        if not ok:
+            return
+        s = self.library[names.index(name)]
+        d.sound, d.category, d.score, d.keep = s.path, s.category, 1.0, True
+        d.fixed = True
+        it.setText(self._text(d))
+        it.setCheckState(Qt.CheckState.Checked)
+        if self.play:
+            self.play(s.path)
 
     def _current(self):
         r = self.list.currentRow()

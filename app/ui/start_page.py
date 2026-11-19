@@ -13,9 +13,9 @@ from version import __version__
 from .style import RED, asset
 
 WHATS_NEW = [
-    "Nouveau : l'IA apprend tes sound kills directement depuis ton projet FL Studio (.flp)",
+    "Apprendre d'un edit : bouton « Corriger ce son » quand l'IA s'est trompée",
     "« Photo des sons » : une image de tous les sons utilisés",
-    "Apprendre d'un edit : marche avec tes vrais edits",
+    "L'IA reprend en priorité les sons que tu utilises le plus",
 ]
 
 

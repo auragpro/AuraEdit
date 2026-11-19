@@ -215,10 +215,6 @@ class SoundsTab(QWidget):
         self.btn_learn_edit.setToolTip("L'IA écoute un de tes edits finis et copie ta façon de placer les sons")
         self.btn_learn_edit.clicked.connect(self.learn_from_edit)
         ll.addWidget(self.btn_learn_edit)
-        self.btn_learn_flp = QPushButton("Apprendre d'un projet FL Studio...")
-        self.btn_learn_flp.setToolTip("L'IA lit tes sound kills dans ton projet .flp")
-        self.btn_learn_flp.clicked.connect(self.learn_from_flp)
-        ll.addWidget(self.btn_learn_flp)
 
         # ---------- timeline + liste (droite)
         self.timeline = Timeline()
@@ -569,15 +565,6 @@ class SoundsTab(QWidget):
         kept, _ = self.edit_dialog.learned
         if kept:
             self.status.setText(f"L'IA a appris de ton edit ({kept} sons). Clique « Autre version » pour voir le résultat.")
-        self.refresh(self.selected_id())
-
-    def learn_from_flp(self):
-        from ..flp_dialog import FlpDialog
-        self.flp_dialog = FlpDialog(self.ai, self.library, self.project.music, self)
-        self.flp_dialog.exec()
-        kept, _ = self.flp_dialog.learned
-        if kept:
-            self.status.setText(f"L'IA a appris de ton projet FL Studio ({kept} sons). Clique « Autre version ».")
         self.refresh(self.selected_id())
 
     def reset_ai(self):

@@ -133,19 +133,3 @@ class ListenThread(QThread):
         except Exception as e:
             self.failed.emit(str(e))
 
-
-class FlpLearnThread(QThread):
-    """Analyse la musique et prépare l'apprentissage depuis un projet FL Studio."""
-    done = pyqtSignal(object)
-    failed = pyqtSignal(str)
-
-    def __init__(self, proj, library, music, music_start, music_channel, parent=None):
-        super().__init__(parent)
-        self.args = (proj, list(library), music, music_start, music_channel)
-
-    def run(self):
-        from app.core import edit_learning
-        try:
-            self.done.emit(edit_learning.from_flp(*self.args))
-        except Exception as e:
-            self.failed.emit(str(e))
