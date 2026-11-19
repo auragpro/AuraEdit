@@ -96,7 +96,7 @@ class AnalyzeThread(QThread):
             self.failed.emit(str(e))
 
 
-class RenderThread(QThread):
+class MixThread(QThread):
     """Mixe la musique et les sons dans des fichiers WAV."""
     done = pyqtSignal(str, str)     # chemin mix, chemin sons seuls
     failed = pyqtSignal(str)
@@ -160,10 +160,11 @@ class RenderThread(QThread):
     done = pyqtSignal(dict)
     failed = pyqtSignal(str)
 
-    def __init__(self, project, output, parent=None):
+    def __init__(self, project, output, parent=None, export=None):
         super().__init__(parent)
         self.project = project
         self.output = output
+        self.export = export
         self._cancel = False
 
     def cancel(self):
@@ -173,7 +174,7 @@ class RenderThread(QThread):
         from app.core import render
         try:
             res = render.render(self.project, self.output, progress=self.progress.emit,
-                                is_cancelled=lambda: self._cancel)
+                                is_cancelled=lambda: self._cancel, export=self.export)
         except render.Cancelled:
             self.failed.emit("Rendu annulé.")
             return

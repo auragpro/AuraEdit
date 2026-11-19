@@ -153,7 +153,7 @@ def apply(src, output, cuts, cfg, w, h, fps, total, is_cancelled=None, progress=
                            creationflags=audio._NO_WINDOW)
     enc = subprocess.Popen([ff, "-y", "-hide_banner", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "rgb24",
                             "-s", f"{w}x{h}", "-r", str(fps), "-i", "-", "-c:v", "libx264", "-preset", "veryfast",
-                            "-crf", "16", "-pix_fmt", "yuv420p", str(output)],
+                            "-crf", "10", "-pix_fmt", "yuv420p", str(output)],
                            stdin=subprocess.PIPE, stderr=subprocess.PIPE, creationflags=audio._NO_WINDOW)
     err = []
     threading.Thread(target=lambda: err.append(enc.stderr.read()), daemon=True).start()

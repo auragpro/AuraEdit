@@ -441,7 +441,7 @@ def _render(path, start, end, cfg, output, is_cancelled=None, progress=None):
     with tempfile.TemporaryFile() as err:
         enc = subprocess.Popen([audio.ffmpeg_exe(), "-y", "-hide_banner", "-f", "rawvideo", "-pix_fmt", "rgb24",
                                 "-s", f"{W}x{H}", "-r", str(FPS), "-i", "-", "-c:v", "libx264", "-preset",
-                                "medium", "-crf", "14", "-pix_fmt", "yuv420p", str(output)],
+                                "medium", "-crf", "10", "-pix_fmt", "yuv420p", str(output)],
                                stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=err,
                                creationflags=audio._NO_WINDOW)
         try:

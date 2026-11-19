@@ -1,7 +1,10 @@
-## Nouveautés de la version 0.7.1
+## Nouveautés de la version 0.7.2
 
-- **Shakes Hit Impulse copiés à l'identique depuis ton After Effects** :
-  - les 10 versions (IN 1x → 5x, OUT 1x → 5x) ont été rendues dans After Effects puis **mesurées image par image** ;
-  - l'app rejoue exactement le **zoom** (IN = zoom avant, OUT = zoom arrière, bords en miroir), le **balancier de rotation** et le **mouvement de position** de Motion Bro ;
-  - le décalage de couleurs (rouge / bleu) suit la même force et le même timing.
-- Le **PEAK** tombe pile sur chaque coupe : **4 images avant, 20 images après** (5ᵉ cran de Duration), même si ça déborde sur le clip suivant.
+- **Fini la perte de qualité** : les étapes du rendu (préparation des clips, time remap, shakes) gardent maintenant une qualité quasi parfaite. La vidéo n'est compressée qu'**une seule fois**, à la fin, avec tes réglages.
+- **Nouveau : « Qualité de l'export »** dans l'Accueil, au-dessus du bouton « Générer l'edit » :
+  - **Résolution** : 720p, 1080p, 1440p ou 4K ;
+  - **Images/s** : 24, 25, 30, 50 ou 60 ;
+  - **Débit** : de 2 à 300 Mb/s (40–80 Mb/s = très bonne qualité en 1080p 60 i/s, 100 Mb/s et plus en 4K) ;
+  - **Encodage** : Rapide, Équilibré ou Meilleure qualité (plus lent).
+- Tes réglages sont gardés pour tous tes projets.
+- Correction : l'export du mix dans **Sons IA** remarche.

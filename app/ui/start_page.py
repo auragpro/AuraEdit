@@ -13,9 +13,9 @@ from version import __version__
 from .style import RED, asset
 
 WHATS_NEW = [
-    "Shakes copiés image par image sur le Hit Impulse de ton After Effects",
-    "Même zoom, même balancier de rotation, même mouvement que Motion Bro",
-    "Peak pile sur chaque coupe : 4 images avant, 20 après"]
+    "Qualité d'export au choix : 720p, 1080p, 1440p ou 4K",
+    "Images/s (24 à 60) et débit (Mb/s) réglables",
+    "Plus de perte de qualité pendant le rendu"]
 
 
 def ago(ts):

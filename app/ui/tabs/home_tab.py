@@ -4,7 +4,7 @@ from pathlib import Path
 
 from PyQt6.QtCore import QUrl, pyqtSignal
 from PyQt6.QtGui import QDesktopServices
-from PyQt6.QtWidgets import (QFileDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QMessageBox,
+from PyQt6.QtWidgets import (QComboBox, QSpinBox, QFileDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QMessageBox,
                              QProgressBar, QPushButton, QVBoxLayout, QWidget)
 
 from ..widgets import page_header
@@ -44,7 +44,37 @@ class HomeTab(QWidget):
         self.bar = QProgressBar()
         self.bar.setRange(0, 1000)
         self.bar.hide()
-        hint = QLabel("Rendu : intro → clips dans l'ordre → outro, sur ta musique, en 1080p 60 i/s. "
+        # --- réglages d'export
+        from app.core import export_cfg
+        self.ecfg = export_cfg.load()
+        self.e_res = QComboBox()
+        self.e_res.addItems(list(export_cfg.RESOLUTIONS))
+        self.e_res.setCurrentText(self.ecfg["resolution"])
+        self.e_fps = QComboBox()
+        self.e_fps.addItems([f"{f} i/s" for f in export_cfg.FPS_CHOICES])
+        self.e_fps.setCurrentText(f"{self.ecfg['fps']} i/s")
+        self.e_bit = QSpinBox()
+        self.e_bit.setRange(2, 300)
+        self.e_bit.setSuffix(" Mb/s")
+        self.e_bit.setValue(self.ecfg["debit"])
+        self.e_bit.setToolTip("Débit vidéo. 1080p 60 i/s : 40–80 Mb/s = très bonne qualité. 4K : 100 Mb/s et plus.")
+        self.e_enc = QComboBox()
+        self.e_enc.addItems(list(export_cfg.PRESETS))
+        self.e_enc.setCurrentText(self.ecfg["encodage"])
+        for w in (self.e_res, self.e_fps, self.e_enc):
+            w.currentTextChanged.connect(self._save_export)
+        self.e_bit.valueChanged.connect(self._save_export)
+        erow = QHBoxLayout()
+        for lab, w in (("Résolution", self.e_res), ("Images/s", self.e_fps), ("Débit", self.e_bit),
+                       ("Encodage", self.e_enc)):
+            l = QLabel(lab)
+            l.setObjectName("hint")
+            erow.addWidget(l)
+            erow.addWidget(w)
+            erow.addSpacing(10)
+        erow.addStretch(1)
+
+        hint = QLabel("Rendu : intro → clips dans l'ordre → outro, sur ta musique, avec les réglages d'export ci-dessus. "
                       "Les shakes (onglet Montage → Shake) sont posés sur chaque coupe.")
         hint.setObjectName("hint")
         hint.setWordWrap(True)
@@ -65,6 +95,10 @@ class HomeTab(QWidget):
         lay.addWidget(card)
         lay.addWidget(self.missing)
         lay.addStretch(1)
+        exp = QLabel("Qualité de l'export")
+        exp.setStyleSheet("font-weight: 600;")
+        lay.addWidget(exp)
+        lay.addLayout(erow)
         lay.addLayout(row)
         lay.addWidget(self.bar)
         lay.addWidget(self.render_status)
@@ -88,7 +122,7 @@ class HomeTab(QWidget):
             return
         if not out.lower().endswith(".mp4"):
             out += ".mp4"
-        self.thread = RenderThread(self.project, out, self)
+        self.thread = RenderThread(self.project, out, self, export=dict(self.ecfg))
         self.thread.progress.connect(self._progress)
         self.thread.done.connect(self._done)
         self.thread.failed.connect(self._failed)
@@ -98,6 +132,13 @@ class HomeTab(QWidget):
         self.bar.show()
         self.render_status.setText("Rendu en cours...")
         self.thread.start()
+
+    def _save_export(self, *_):
+        from app.core import export_cfg
+        self.ecfg = export_cfg.clean({"resolution": self.e_res.currentText(),
+                                      "fps": int(self.e_fps.currentText().split()[0]),
+                                      "debit": self.e_bit.value(), "encodage": self.e_enc.currentText()})
+        export_cfg.save(self.ecfg)
 
     def cancel(self):
         if self.thread is not None:

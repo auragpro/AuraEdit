@@ -16,7 +16,7 @@ from app.core import sound_ai as sa
 
 from ..style import MUTED, PANEL, PANEL_2, RED
 from ..widgets import page_header
-from ..workers import AnalyzeThread, CutsThread, RenderThread
+from ..workers import AnalyzeThread, CutsThread, MixThread
 
 ROLE = Qt.ItemDataRole.UserRole
 
@@ -624,7 +624,7 @@ class SoundsTab(QWidget):
             return
         out = Path(tempfile.gettempdir()) / "auraedit_apercu.wav"
         self._busy(True, "Préparation de l'aperçu...")
-        th = RenderThread(self.project.music, list(self.placements), str(out), None, self)
+        th = MixThread(self.project.music, list(self.placements), str(out), None, self)
         th.done.connect(self._preview_done)
         th.failed.connect(self._failed)
         self._start(th)
@@ -663,7 +663,7 @@ class SoundsTab(QWidget):
         mix = Path(folder) / f"{base} - musique et sons.wav"
         sfx = Path(folder) / f"{base} - sons seuls.wav"
         self._busy(True, "Export en cours...")
-        th = RenderThread(self.project.music, list(self.placements), str(mix), str(sfx), self)
+        th = MixThread(self.project.music, list(self.placements), str(mix), str(sfx), self)
         th.done.connect(lambda m, s: self._busy(False, f"Exporté : {Path(m).name} et {Path(s).name}"))
         th.failed.connect(self._failed)
         self._start(th)

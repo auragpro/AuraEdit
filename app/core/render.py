@@ -56,7 +56,7 @@ def segments(project):
     return [(k, p) for k, p in segs if p and Path(p).is_file()]
 
 
-def render(project, output, progress=None, is_cancelled=None):
+def render(project, output, progress=None, is_cancelled=None, export=None):
     """Fabrique le MP4. Renvoie {"fichier", "coupes": [s...], "segments": [...]}."""
     segs = segments(project)
     if not any(k == "clip" for k, _ in segs):
@@ -93,7 +93,7 @@ def render(project, output, progress=None, is_cancelled=None):
                 t += d
                 continue
             _run([ff, "-y", "-hide_banner", "-i", str(path), "-an", "-vf", vf, "-c:v", "libx264",
-                  "-preset", "veryfast", "-crf", "18", str(part)], is_cancelled)
+                  "-preset", "veryfast", "-crf", "10", str(part)], is_cancelled)
             d = duration(part)
             info.append({"type": kind, "fichier": str(path), "debut": round(t, 3), "duree": round(d, 3)})
             parts.append(part)
@@ -125,7 +125,10 @@ def render(project, output, progress=None, is_cancelled=None):
         music = project.music if project.music and Path(project.music).is_file() else None
         if music:
             cmd += ["-i", music, "-map", "0:v", "-map", "1:a", "-c:a", "aac", "-b:a", "320k", "-t", f"{t:.3f}"]
-        cmd += ["-c:v", "copy", "-movflags", "+faststart", str(output)]
+        from . import export_cfg
+        if progress:
+            progress(min(0.99, (len(segs) + 0.9) / steps), "Encodage final (qualité d'export)...")
+        cmd += export_cfg.ffmpeg_args(export or export_cfg.load()) + ["-movflags", "+faststart", str(output)]
         _run(cmd, is_cancelled)
     if progress:
         progress(1.0, "Terminé")
