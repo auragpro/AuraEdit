@@ -1,9 +1,8 @@
-"""Shakes « Hit Impulse » posés sur chaque coupe de l'edit : le PEAK (moment le plus fort) tombe
-pile sur la coupe entre 2 clips. Durée normale : 4 images avant le peak, 20 après (à 60 i/s).
+"""Shakes « Hit Impulse » posés sur chaque coupe de l'edit.
 
-Recréé à partir du preset Hit Impulse (pack Simple) : léger zoom (bords en miroir), tremblement de
-position et de rotation, décalage de couleurs, plus forts de 1x à 5x. IN = punch en zoom avant,
-OUT = punch en zoom arrière. Les 9 crans de durée étirent ou resserrent le shake autour du peak.
+Reproduit À L'IDENTIQUE à partir du preset Motion Bro : chaque version (IN 1x–5x, OUT 1x–5x) a été rendue
+dans After Effects sur une grille de points, puis mesurée image par image (zoom, rotation, position,
+décalage rouge/bleu). Le PEAK tombe pile sur la coupe ; durée normale : 4 images avant, 20 après (60 i/s).
 """
 import math
 import subprocess
@@ -14,21 +13,29 @@ import numpy as np
 
 from . import audio
 
-FPS_REF = 60.0           # durées comptées en images de l'edit (60 i/s)
-# niveau : (zoom au peak, amplitude position px, décalage chromatique px)
-LEVELS = {1: (0.97, 25, 5), 2: (0.95, 30, 6), 3: (0.90, 35, 7), 4: (0.85, 45, 8), 5: (0.80, 60, 9)}
-ROT_AMP = 4.5            # degrés
-POS_FREQ, ROT_FREQ = 5.0, 10.0
+FPS_REF = 60.0           # le rendu de l'edit est à 60 i/s
 DURATIONS = [0.5, 0.625, 0.75, 0.875, 1.0, 1.25, 1.5, 1.75, 2.0]     # crans 1 → 9 (5 = 4 i. avant / 20 après)
-# images clés du preset, en images par rapport au PEAK (= la coupe) : (image, valeur, infl. entrée, infl. sortie)
-ENV = {
-    "zoom":   [(-4, 0.0, 0.0, 0.125), (0, 1.0, 0.576, 0.436), (6, 0.0, 0.564, 0.0)],
-    "pos":    [(-4, 0.0, 0.0, 0.756), (0, 1.0, 0.333, 0.311), (20, 0.0, 0.791, 0.0)],
-    "rot":    [(0, 0.0, 0.0, 0.756), (2, 1.0, 0.333, 0.311), (20, 0.0, 0.791, 0.0)],
-    "chroma": [(-2, 0.0, 0.0, 0.333), (2, 1.0, 0.594, 0.333), (8, 0.0, 1.0, 0.0)],
-}
-BEFORE, AFTER = 4, 20    # images avant / après le peak à la durée normale
-SEED = 1234
+BEFORE, AFTER = 4, 20    # images (60 i/s) avant / après le peak à la durée normale
+_DATA = None
+
+
+def data():
+    """Courbes mesurées image par image dans After Effects (voir app/assets/shake_hit_impulse.json)."""
+    global _DATA
+    if _DATA is None:
+        import json
+        import sys
+        from pathlib import Path
+        cands = [Path(__file__).resolve().parents[1] / "assets" / "shake_hit_impulse.json"]
+        if getattr(sys, "_MEIPASS", None):
+            cands.append(Path(sys._MEIPASS) / "app" / "assets" / "shake_hit_impulse.json")
+        for c in cands:
+            if c.is_file():
+                _DATA = json.loads(c.read_text(encoding="utf-8"))
+                break
+        else:
+            raise RuntimeError("Données du shake introuvables (shake_hit_impulse.json)")
+    return _DATA
 
 
 def defaults():
@@ -51,70 +58,44 @@ def clean(cfg):
     return d
 
 
-def _bez(u, o, i):
-    """Courbe d'ease After Effects (vitesses nulles) : temps normalisé u → valeur 0..1."""
-    x1, x2 = max(o, 1e-3), 1 - max(i, 1e-3)
-    lo, hi = 0.0, 1.0
-    for _ in range(22):
-        s = (lo + hi) / 2
-        x = 3 * (1 - s) ** 2 * s * x1 + 3 * (1 - s) * s * s * x2 + s ** 3
-        if x < u:
-            lo = s
-        else:
-            hi = s
-    s = (lo + hi) / 2
-    return 3 * (1 - s) * s * s + s ** 3
+def _source_time(dt, k, D):
+    """Temps dans le preset (s) pour un écart dt (s) au peak : 4 i. avant → début..peak, 20 i. après → peak..fin."""
+    peak, deb, fin = D["peak"], D["debut"], D["fin"]
+    if dt < 0:
+        return peak + dt * (peak - deb) / (BEFORE / FPS_REF * k)
+    return peak + dt * (fin - peak) / (AFTER / FPS_REF * k)
 
 
-def envelope(name, f):
-    keys = ENV[name]
-    if f <= keys[0][0] or f >= keys[-1][0]:
-        return 0.0
-    for a, b in zip(keys, keys[1:]):
-        if a[0] <= f <= b[0]:
-            u = (f - a[0]) / (b[0] - a[0])
-            return a[1] + (b[1] - a[1]) * _bez(u, a[3], b[2])
-    return 0.0
-
-
-def _noise(x, seed):
-    """Bruit lisse 1D dans [-1, 1] (comme le wiggle d'After Effects à 1 octave)."""
-    i = math.floor(x)
-    f = x - i
-
-    def r(n):
-        h = (n * 374761393 + seed * 668265263) & 0xFFFFFFFF
-        h = ((h ^ (h >> 13)) * 1274126177) & 0xFFFFFFFF
-        v = ((h ^ (h >> 16)) & 0xFFFF) / 32767.5 - 1.0
-        return math.copysign(0.6 + 0.4 * abs(v), v)       # toujours un vrai coup (jamais presque 0)
-    s = f * f * f * (f * (f * 6 - 15) + 10)
-    return r(i) + (r(i + 1) - r(i)) * s
+def _sample(frames, fps, s):
+    x = s * fps
+    i = int(math.floor(x))
+    if i < 0 or i + 1 >= len(frames):
+        return None
+    u = x - i
+    a, b = frames[i], frames[i + 1]
+    return [p + (q - p) * u for p, q in zip(a, b)]
 
 
 def frame_params(t, cuts, cfg):
-    """Paramètres de l'image à l'instant t : zoom, dx, dy, rotation (°), chromatique (px).
-    Chaque coupe est le PEAK du shake ; les shakes qui se chevauchent s'additionnent."""
-    zoom, dx, dy, rot, chroma = 1.0, 0.0, 0.0, 0.0, 0.0
+    """Matrice 3x3 (sortie = M·entrée) et décalage rouge-bleu à l'instant t. Chaque coupe = PEAK ;
+    les shakes qui se chevauchent se combinent."""
+    D = data()
+    frames = D["presets"][f"{cfg['niveau']}x_{'In' if cfg['sens'] == 'in' else 'Out'}"]
     k = DURATIONS[cfg["duree"] - 1]
-    z, pa, ca = LEVELS[cfg["niveau"]]
-    zin = cfg["sens"] == "in"
-    for n, c in enumerate(cuts):
-        f = (t - c) * FPS_REF / k               # images depuis le peak, à la durée normale
-        if f <= -BEFORE or f >= AFTER:
+    M = np.eye(3)
+    rb = np.zeros(2)
+    lo, hi = -BEFORE / FPS_REF * k, AFTER / FPS_REF * k
+    for c in cuts:
+        dt = t - c
+        if dt <= lo or dt >= hi:
             continue
-        seed = SEED + n * 101
-        e = envelope("zoom", f) * (1 - z)
-        zoom *= (1 + e) if zin else (1 - e)
-        ep = envelope("pos", f) * pa
-        if ep:
-            x = (t - c) * POS_FREQ / k          # coup le plus fort pile au peak
-            dx += ep * _noise(x, seed)
-            dy += ep * _noise(x, seed + 31)
-        er = envelope("rot", f) * ROT_AMP
-        if er:
-            rot += er * _noise((t - c) * ROT_FREQ / k, seed + 57)
-        chroma += envelope("chroma", f) * ca
-    return zoom, dx, dy, rot, chroma
+        v = _sample(frames, D["fps"], _source_time(dt, k, D))
+        if v is None:
+            continue
+        m = np.array([[v[0], v[1], v[2]], [v[3], v[4], v[5]], [0, 0, 1]])
+        M = m @ M
+        rb += (v[6], v[7])
+    return M, rb
 
 
 def _reflect(i, n):
@@ -127,36 +108,34 @@ class _Warper:
     def __init__(self, w, h):
         self.w, self.h = w, h
         ys, xs = np.mgrid[0:h, 0:w].astype(np.float32)
-        self.xc = xs - (w - 1) / 2
-        self.yc = ys - (h - 1) / 2
+        self.xs, self.ys = xs, ys
 
-    def apply(self, img, zoom, dx, dy, rot, chroma):
+    def _bilinear(self, ch, sx, sy):
         w, h = self.w, self.h
-        a = math.radians(rot)
-        ca, sa = math.cos(a) / zoom, math.sin(a) / zoom
-        # image source = inverse de (zoom, rotation, déplacement) autour du centre
-        x = self.xc - dx
-        y = self.yc - dy
-        sx = ca * x + sa * y + (w - 1) / 2
-        sy = -sa * x + ca * y + (h - 1) / 2
         x0 = np.floor(sx)
         y0 = np.floor(sy)
-        fx = (sx - x0)[..., None]
-        fy = (sy - y0)[..., None]
+        fx = sx - x0
+        fy = sy - y0
         x0 = x0.astype(np.int32)
         y0 = y0.astype(np.int32)
         xa, xb = _reflect(x0, w), _reflect(x0 + 1, w)
         ya, yb = _reflect(y0, h), _reflect(y0 + 1, h)
+        top = ch[ya, xa] * (1 - fx) + ch[ya, xb] * fx
+        bot = ch[yb, xa] * (1 - fx) + ch[yb, xb] * fx
+        return top * (1 - fy) + bot * fy
+
+    def apply(self, img, M, rb):
+        """img : image d'entrée. Bords en miroir comme le preset. Rouge décalé de +rb/2, bleu de -rb/2."""
+        # coordonnées du coin des pixels (convention After Effects : centre du pixel = i + 0.5)
+        Mi = np.linalg.inv(M)
         src = img.astype(np.float32)
-        top = src[ya, xa] * (1 - fx) + src[ya, xb] * fx
-        bot = src[yb, xa] * (1 - fx) + src[yb, xb] * fx
-        out = top * (1 - fy) + bot * fy
-        s = int(round(chroma))
-        if s:
-            idx = _reflect(np.arange(w) - s, w)
-            out[..., 0] = out[:, idx, 0]
-            idx = _reflect(np.arange(w) + s, w)
-            out[..., 2] = out[:, idx, 2]
+        out = np.empty_like(src)
+        for c, sh in ((0, rb / 2), (1, np.zeros(2)), (2, -rb / 2)):
+            px = self.xs + 0.5 - float(sh[0])
+            py = self.ys + 0.5 - float(sh[1])
+            sx = Mi[0, 0] * px + Mi[0, 1] * py + Mi[0, 2] - 0.5
+            sy = Mi[1, 0] * px + Mi[1, 1] * py + Mi[1, 2] - 0.5
+            out[..., c] = self._bilinear(src[..., c], sx, sy)
         return np.clip(out + 0.5, 0, 255).astype(np.uint8)
 
 
@@ -189,12 +168,12 @@ def apply(src, output, cuts, cfg, w, h, fps, total, is_cancelled=None, progress=
             buf = dec.stdout.read(size)
             if len(buf) < size:
                 break
-            p = frame_params(n / fps, cuts, cfg)
-            if abs(p[0] - 1) < 1e-4 and abs(p[1]) < 0.05 and abs(p[2]) < 0.05 and abs(p[3]) < 0.01 and p[4] < 0.5:
+            M, rb = frame_params(n / fps, cuts, cfg)
+            if np.abs(M - np.eye(3)).max() < 1e-5 and np.abs(rb).max() < 0.05:
                 pending.append(buf)
             else:
                 img = np.frombuffer(buf, np.uint8).reshape(h, w, 3)
-                pending.append(pool.submit(warper.apply, img, *p))
+                pending.append(pool.submit(warper.apply, img, M, rb))
             while len(pending) > 8 or (pending and isinstance(pending[0], bytes)):
                 x = pending.pop(0)
                 enc.stdin.write(x if isinstance(x, bytes) else x.result().tobytes())

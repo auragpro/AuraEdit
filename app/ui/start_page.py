@@ -13,9 +13,9 @@ from version import __version__
 from .style import RED, asset
 
 WHATS_NEW = [
-    "Shakes refaits : le PEAK tombe pile sur chaque coupe, comme dans Motion Bro",
-    "Durée normale : 4 images avant le peak, 20 après (9 crans)",
-    "IN / OUT 1x à 5x en un seul choix, seed retiré"]
+    "Shakes copiés image par image sur le Hit Impulse de ton After Effects",
+    "Même zoom, même balancier de rotation, même mouvement que Motion Bro",
+    "Peak pile sur chaque coupe : 4 images avant, 20 après"]
 
 
 def ago(ts):
