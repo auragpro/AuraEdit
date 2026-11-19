@@ -13,9 +13,9 @@ from version import __version__
 from .style import RED, asset
 
 WHATS_NEW = [
-    "Mes clips : 10 couteaux déjà prêts avec leur image, il suffit d'ajouter tes clips",
-    "Plus d'images dédoublées : Pixel Motion par défaut",
-    "Change le time remap d'un clip directement dans Mes clips",
+    "Import FL Studio (.flp) : les sound kills deviennent des repères clip / dash / kunai",
+    "Le logiciel apprend de tes corrections pour reconnaître tes sound kills",
+    "Mes clips : 10 couteaux déjà prêts avec leur image",
 ]
 
 

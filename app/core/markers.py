@@ -34,7 +34,10 @@ def clean(markers, min_gap=0.06):
     for m in sorted(markers, key=lambda m: m["t"]):
         if out and m["t"] - out[-1]["t"] < min_gap:
             continue
-        out.append({"t": round(float(m["t"]), 3), "type": m["type"] if m["type"] in TYPES else "clip"})
+        item = {"t": round(float(m["t"]), 3), "type": m["type"] if m["type"] in TYPES else "clip"}
+        if isinstance(m.get("src"), dict):            # repère venu d'un .flp : sert à l'apprentissage
+            item["src"] = m["src"]
+        out.append(item)
     return out
 
 

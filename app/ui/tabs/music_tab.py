@@ -18,6 +18,7 @@ class Timeline(QWidget):
     """Forme de la musique + repères. Clic sur un repère : change son type. Clic droit : le retire.
     Double-clic dans le vide : ajoute un clip."""
     edited = pyqtSignal()
+    retyped = pyqtSignal(object)      # un repère a changé de type (pour l'apprentissage)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -65,6 +66,7 @@ class Timeline(QWidget):
         else:
             m = self.markers[i]
             m["type"] = mk.TYPES[(mk.TYPES.index(m["type"]) + 1) % len(mk.TYPES)]
+            self.retyped.emit(m)
         self.update()
         self.edited.emit()
 
@@ -134,6 +136,7 @@ class MusicTab(QWidget):
         self.timeline = Timeline()
         self.timeline.set_markers(project.markers)
         self.timeline.edited.connect(self._edited)
+        self.timeline.retyped.connect(self._retyped)
         self.legend = QLabel()
         self.legend.setTextFormat(Qt.TextFormat.RichText)
         self.status = QLabel()
@@ -159,15 +162,18 @@ class MusicTab(QWidget):
                            "Ta musique avec tes sound kills déjà faits : le logiciel les retrouve.", True), 1, 1)
         grid.addWidget(btn("Depuis un audio de claps...", self.from_claps,
                            "Un clap par moment, avec le clap de chaque type (voir « Mes claps » en bas)."), 1, 2)
-        grid.addWidget(QLabel("Claps :"), 2, 0, 1, 3)
+        grid.addWidget(btn("Depuis mon projet FL Studio (.flp)...", self.from_flp,
+                           "Ouvre ton .flp : chaque sound kill posé dans la playlist devient un repère, "
+                           "le logiciel devine clip / dash / kunai et apprend de tes corrections.", True), 2, 0, 1, 3)
+        grid.addWidget(QLabel("Claps :"), 3, 0, 1, 3)
         grid.addWidget(btn("Créer l'audio de claps...", self.make_claps,
-                           "Fabrique automatiquement l'audio de claps à partir des repères."), 3, 0)
+                           "Fabrique automatiquement l'audio de claps à partir des repères."), 4, 0)
         grid.addWidget(btn("Exporter les 3 claps (WAV)...", self.export_claps,
-                           "Pour faire ton audio de claps toi-même dans FL Studio."), 3, 1)
-        grid.addWidget(btn("Tout effacer", self.clear), 3, 2)
+                           "Pour faire ton audio de claps toi-même dans FL Studio."), 4, 1)
+        grid.addWidget(btn("Tout effacer", self.clear), 4, 2)
 
         # --- mes claps : mes propres fichiers audio pour chaque type
-        grid.addWidget(QLabel("Mes claps (tes propres sons) :"), 4, 0, 1, 3)
+        grid.addWidget(QLabel("Mes claps (tes propres sons) :"), 5, 0, 1, 3)
         self.clap_labels = {}
         crow = QHBoxLayout()
         for kind in mk.TYPES:
@@ -199,7 +205,7 @@ class MusicTab(QWidget):
             bl.addWidget(name)
             bl.addLayout(r)
             crow.addWidget(box)
-        grid.addLayout(crow, 5, 0, 1, 3)
+        grid.addLayout(crow, 6, 0, 1, 3)
         self._clap_names()
 
         card = QFrame()
@@ -285,7 +291,47 @@ class MusicTab(QWidget):
         else:
             self.timeline.set_audio(None, 0.0)
 
+    def _retyped(self, marker):
+        """Tu corriges un repère venu d'un .flp sur la frise : le logiciel apprend."""
+        from app.core import sk_learn
+        try:
+            sk_learn.correct(marker, marker["type"])
+        except Exception:
+            pass
+
     # ----------------------------------------------------------- sources
+    def from_flp(self):
+        f, _ = QFileDialog.getOpenFileName(self, "Ton projet FL Studio avec les sound kills", "",
+                                           "Projet FL Studio (*.flp)")
+        if not f:
+            return
+        from app.core import flp
+        music = self.project.music
+
+        def job(prog):
+            prog("Lecture du projet FL Studio", 0.2)
+            info, hits = flp.soundkills(f, music)
+            from app.core import sk_learn
+            prog("Analyse des sound kills", 0.6)
+            for h in hits:                      # empreinte de chaque son (pour reconnaître)
+                sk_learn.profile(h["sample"])
+            return info, hits
+
+        def done(res):
+            info, hits = res
+            if not hits:
+                self.status.setText("Aucun sound kill trouvé dans la playlist de ce projet "
+                                    "(les sons doivent être posés comme clips audio dans la playlist).")
+                return
+            from ..flp_dialog import FlpDialog
+            dlg = FlpDialog(hits, info, self)
+            if dlg.exec():
+                self._set_markers(dlg.result, "dans ton projet FL Studio")
+                if dlg.skipped:
+                    self.status.setText(self.status.text() + f" ({dlg.skipped} ignoré(s))")
+                self._offer_claps()
+        self._run(job, done, "Lecture du projet FL Studio...")
+
     def from_sounds(self):
         pl = (self.project.sons or {}).get("placements") or []
         if not pl:
