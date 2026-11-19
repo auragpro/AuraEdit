@@ -16,7 +16,7 @@ from app.core import sound_ai as sa
 
 from ..style import MUTED, PANEL, PANEL_2, RED
 from ..widgets import page_header
-from ..workers import AnalyzeThread, RenderThread
+from ..workers import AnalyzeThread, CutsThread, RenderThread
 
 ROLE = Qt.ItemDataRole.UserRole
 
@@ -215,6 +215,11 @@ class SoundsTab(QWidget):
         self.btn_learn_edit.setToolTip("L'IA écoute un de tes edits finis et copie ta façon de placer les sons")
         self.btn_learn_edit.clicked.connect(self.learn_from_edit)
         ll.addWidget(self.btn_learn_edit)
+        self.btn_cuts = QPushButton("Sons de kill sur les transitions d'un edit...")
+        self.btn_cuts.setObjectName("primary")
+        self.btn_cuts.setToolTip("Donne ton edit (vidéo) : un son de kill est placé à chaque transition")
+        self.btn_cuts.clicked.connect(self.kills_on_cuts)
+        ll.addWidget(self.btn_cuts)
 
         # ---------- timeline + liste (droite)
         self.timeline = Timeline()
@@ -311,7 +316,7 @@ class SoundsTab(QWidget):
         self.changed.emit()
 
     def _busy(self, busy, text=""):
-        for b in (self.btn_generate, self.btn_regen, self.btn_preview, self.btn_export, self.btn_validate):
+        for b in (self.btn_generate, self.btn_regen, self.btn_preview, self.btn_export, self.btn_validate, self.btn_cuts):
             b.setEnabled(not busy)
         if text:
             self.status.setText(text)
@@ -566,6 +571,40 @@ class SoundsTab(QWidget):
         if kept:
             self.status.setText(f"L'IA a appris de ton edit ({kept} sons). Clique « Autre version » pour voir le résultat.")
         self.refresh(self.selected_id())
+
+    def kills_on_cuts(self):
+        if not self.library:
+            QMessageBox.information(self, "Sons IA", "Choisis d'abord ton dossier de sons.")
+            return
+        path, _ = QFileDialog.getOpenFileName(self, "Ton edit (vidéo)", "",
+                                              "Vidéos (*.mp4 *.mov *.mkv *.avi *.webm *.m4v)")
+        if not path:
+            return
+        self._busy(True, "L'IA regarde ton edit et cherche les transitions...")
+        th = CutsThread(path, self)
+        th.done.connect(lambda cuts, an: self._cuts_done(path, cuts, an))
+        th.failed.connect(self._failed)
+        self._start(th)
+
+    def _cuts_done(self, path, cuts, analysis):
+        from app.core import video_cuts
+        self._busy(False, "")
+        if not cuts:
+            QMessageBox.information(self, "Sons IA", "Aucune transition trouvée dans cet edit.")
+            return
+        # l'edit devient la « musique » : l'aperçu et l'export se font sur son audio
+        self.project.music = path
+        self.analysis = analysis
+        try:
+            self.placements = video_cuts.place_kills(cuts, analysis, self.library, self.ai, self.seed)
+        except ValueError as e:
+            QMessageBox.information(self, "Sons IA", str(e))
+            return
+        self.status.setText(f"{len(cuts)} transition(s) trouvée(s) : un son de kill sur chacune. "
+                            "Change ceux qui ne te plaisent pas, puis « Valider : l'IA apprend ».")
+        self._store()
+        self.changed.emit()
+        self.refresh()
 
     def reset_ai(self):
         answer = QMessageBox.question(self, "Réinitialiser l'IA",

@@ -13,9 +13,9 @@ from version import __version__
 from .style import RED, asset
 
 WHATS_NEW = [
+    "Nouveau : donne ton edit, un son de kill est placé à chaque transition",
     "L'IA apprend ton rythme et ton calage depuis tes edits",
     "Tes sous-dossiers de sons deviennent des catégories",
-    "Apprends plusieurs edits d'affilée sans fermer la fenêtre",
 ]
 
 

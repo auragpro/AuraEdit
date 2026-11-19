@@ -133,3 +133,22 @@ class ListenThread(QThread):
         except Exception as e:
             self.failed.emit(str(e))
 
+
+
+class CutsThread(QThread):
+    """Trouve les transitions d'un edit vidéo et analyse son audio."""
+    done = pyqtSignal(object, object)   # cuts, analysis
+    failed = pyqtSignal(str)
+
+    def __init__(self, video, parent=None):
+        super().__init__(parent)
+        self.video = video
+
+    def run(self):
+        from app.core import audio, music_analysis, video_cuts
+        try:
+            cuts = video_cuts.detect_cuts(self.video)
+            y = audio.load(self.video, music_analysis.SR, 1)
+            self.done.emit(cuts, music_analysis.analyze(y))
+        except Exception as e:
+            self.failed.emit(str(e))
