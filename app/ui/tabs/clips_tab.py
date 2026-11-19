@@ -1,9 +1,9 @@
 """Onglet Clips : dossiers de clips (un par couteau), kunais et dash à gauche, ordre de l'edit à droite."""
 from pathlib import Path
 
-from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QColor
-from PyQt6.QtWidgets import QApplication, QProgressDialog
+from PyQt6.QtCore import QRectF, QSize, Qt, pyqtSignal
+from PyQt6.QtGui import QColor, QFont, QIcon, QPainter, QPainterPath, QPixmap
+from PyQt6.QtWidgets import QApplication, QFrame, QLineEdit, QListView, QProgressDialog, QStackedWidget
 from PyQt6.QtWidgets import (QAbstractItemView, QButtonGroup, QFileDialog, QHBoxLayout, QInputDialog,
                              QLabel, QListWidget, QListWidgetItem, QMessageBox, QPushButton,
                              QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget)
@@ -11,7 +11,6 @@ from PyQt6.QtWidgets import (QAbstractItemView, QButtonGroup, QFileDialog, QHBox
 from app.core import project as proj
 
 from ..widgets import file_filter, page_header
-from ..workers import ScanThread
 
 ROLE = Qt.ItemDataRole.UserRole
 FOUND = "Trouvés sur le PC"
@@ -33,17 +32,56 @@ class OrderList(QListWidget):
         self.reordered.emit()
 
 
+CARD_W, CARD_H = 150, 84
+NEW = "__nouveau__"
+GRID_CSS = """
+QListWidget#knives { background: transparent; border: none; }
+QListWidget#knives::item { background: #1b2733; border: 2px solid #243342; border-radius: 12px;
+                           margin: 5px; padding: 6px 4px 8px 4px; color: white; font-weight: 600; }
+QListWidget#knives::item:hover { border: 2px solid #4a5a6a; }
+QListWidget#knives::item:selected { background: #243342; border: 2px solid #e8ecef; }
+"""
+
+
+def _rounded(pix, w=CARD_W, h=CARD_H, r=10):
+    """Image du couteau recadrée en carte arrondie."""
+    out = QPixmap(w, h)
+    out.fill(Qt.GlobalColor.transparent)
+    p = QPainter(out)
+    p.setRenderHint(QPainter.RenderHint.Antialiasing)
+    path = QPainterPath()
+    path.addRoundedRect(QRectF(0, 0, w, h), r, r)
+    p.setClipPath(path)
+    p.fillRect(out.rect(), QColor("#11181f"))
+    if pix is not None and not pix.isNull():
+        sc = pix.scaled(w, h, Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+                        Qt.TransformationMode.SmoothTransformation)
+        p.drawPixmap((w - sc.width()) // 2, (h - sc.height()) // 2, sc)
+    p.end()
+    return out
+
+
+def _symbol(text, size=30):
+    out = _rounded(None)
+    p = QPainter(out)
+    f = QFont()
+    f.setPointSize(size)
+    p.setFont(f)
+    p.setPen(QColor("#c8d0d8"))
+    p.drawText(out.rect(), Qt.AlignmentFlag.AlignCenter, text)
+    p.end()
+    return out
+
+
 class ClipsTab(QWidget):
     changed = pyqtSignal()
 
     def __init__(self, project, parent=None):
         super().__init__(parent)
         self.project = project
-        self.scan_thread = None
-        self.scanned_once = False
-        self.found_paths = []                       # clips trouvés par la recherche (non sauvegardés)
         self.folders = proj.load_clip_folders()     # {couteau: [clips]}
         self.mode = "Clips"
+        self.knife = None                           # couteau ouvert (page de ses clips)
 
         # --- gauche : sélecteur Clips / Kunai / Dash
         self.mode_group = QButtonGroup(self)
@@ -61,41 +99,89 @@ class ClipsTab(QWidget):
             mode_row.addWidget(b)
         self._style_modes()
 
+        # page 1 : grille des couteaux
+        self.filter = QLineEdit()
+        self.filter.setPlaceholderText("Filtrer les couteaux...")
+        self.filter.textChanged.connect(self._filter)
+        self.grid = QListWidget()
+        self.grid.setObjectName("knives")
+        self.grid.setStyleSheet(GRID_CSS)
+        self.grid.setViewMode(QListView.ViewMode.IconMode)
+        self.grid.setResizeMode(QListView.ResizeMode.Adjust)
+        self.grid.setMovement(QListView.Movement.Static)
+        self.grid.setIconSize(QSize(CARD_W, CARD_H))
+        self.grid.setGridSize(QSize(CARD_W + 22, CARD_H + 52))
+        self.grid.setWordWrap(False)
+        self.grid.setUniformItemSizes(True)
+        self.grid.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+        self.grid.itemClicked.connect(self._card_clicked)
+        b_import = QPushButton("Importer un dossier du PC...")
+        b_import.setToolTip("Chaque sous-dossier devient un couteau.")
+        b_import.clicked.connect(self.import_folder)
+        grid_page = QWidget()
+        gl = QVBoxLayout(grid_page)
+        gl.setContentsMargins(0, 0, 0, 0)
+        gl.addWidget(self.filter)
+        gl.addWidget(self.grid, 1)
+        gl.addWidget(b_import)
+
+        # page 2 : les clips d'un couteau
+        b_back = QPushButton("←  Couteaux")
+        b_back.setObjectName("link")
+        b_back.clicked.connect(self.close_knife)
+        self.knife_img = QLabel()
+        self.knife_img.setFixedSize(CARD_W, CARD_H)
+        self.knife_title = QLabel()
+        self.knife_title.setStyleSheet("font-size: 18px; font-weight: 700;")
+        b_img = QPushButton("Image du couteau...")
+        b_img.clicked.connect(self.pick_knife_image)
+        b_fill = QPushButton("Ajouter des clips...")
+        b_fill.setObjectName("primary")
+        b_fill.clicked.connect(self.fill_folder)
+        b_rm = QPushButton("Retirer du couteau")
+        b_rm.clicked.connect(self.remove_from_knife)
+        b_delk = QPushButton("Supprimer le couteau")
+        b_delk.clicked.connect(self.delete_knife)
+        self.clips = QListWidget()
+        self.clips.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+        self.clips.itemDoubleClicked.connect(lambda it: self.add_to_edit([it.data(ROLE)]))
+        info = QVBoxLayout()
+        info.addWidget(self.knife_title)
+        info.addWidget(b_img)
+        info.addStretch(1)
+        top = QHBoxLayout()
+        top.addWidget(self.knife_img)
+        top.addLayout(info, 1)
+        krow = QHBoxLayout()
+        krow.addWidget(b_fill)
+        krow.addWidget(b_rm)
+        krow.addWidget(b_delk)
+        knife_page = QWidget()
+        kl = QVBoxLayout(knife_page)
+        kl.setContentsMargins(0, 0, 0, 0)
+        kl.addWidget(b_back, alignment=Qt.AlignmentFlag.AlignLeft)
+        kl.addLayout(top)
+        kl.addWidget(self.clips, 1)
+        kl.addLayout(krow)
+
+        # page 3 : kunai / dash
         self.tree = QTreeWidget()
         self.tree.setHeaderHidden(True)
         self.tree.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.tree.itemDoubleClicked.connect(self._double)
 
-        self.btn_new = QPushButton("Nouveau dossier (couteau)...")
-        self.btn_fill = QPushButton("Ajouter des clips au dossier...")
-        self.btn_put = QPushButton("Mettre dans un dossier...")
-        self.btn_import = QPushButton("Importer un dossier du PC...")
-        self.btn_scan = QPushButton("Chercher sur mon PC")
-        self.btn_del = QPushButton("Supprimer")
-        self.btn_new.clicked.connect(self.new_folder)
-        self.btn_fill.clicked.connect(self.fill_folder)
-        self.btn_put.clicked.connect(self.put_in_folder)
-        self.btn_import.clicked.connect(self.import_folder)
-        self.btn_scan.clicked.connect(lambda: self.scan(proj.default_clip_folders()))
-        self.btn_del.clicked.connect(self.delete_selected)
+        self.left_stack = QStackedWidget()
+        self.left_stack.addWidget(grid_page)
+        self.left_stack.addWidget(knife_page)
+        self.left_stack.addWidget(self.tree)
+
         self.status = QLabel("")
         self.status.setObjectName("hint")
         self.status.setWordWrap(True)
 
         left = QVBoxLayout()
         left.addLayout(mode_row)
-        left.addWidget(self.tree, 1)
-        r1 = QHBoxLayout()
-        r1.addWidget(self.btn_new)
-        r1.addWidget(self.btn_fill)
-        r2 = QHBoxLayout()
-        r2.addWidget(self.btn_put)
-        r2.addWidget(self.btn_import)
-        r3 = QHBoxLayout()
-        r3.addWidget(self.btn_scan)
-        r3.addWidget(self.btn_del)
-        for r in (r1, r2, r3):
-            left.addLayout(r)
+        left.addWidget(self.left_stack, 1)
         left.addWidget(self.status)
 
         # --- milieu
@@ -138,13 +224,13 @@ class ClipsTab(QWidget):
 
         cols = QHBoxLayout()
         cols.setSpacing(16)
-        cols.addLayout(left, 1)
+        cols.addLayout(left, 3)
         cols.addLayout(middle)
-        cols.addLayout(right, 1)
+        cols.addLayout(right, 2)
 
         lay = QVBoxLayout(self)
         lay.setContentsMargins(32, 28, 32, 28)
-        lay.addWidget(page_header("Clips", "Range tes clips dans des dossiers (un par couteau). En haut à gauche, "
+        lay.addWidget(page_header("Clips", "Choisis un couteau pour voir ses clips. En haut à gauche, "
                                            "choisis ce que tu ajoutes : Clips, Kunai ou Dash."))
         lay.addLayout(cols, 1)
 
@@ -163,10 +249,6 @@ class ClipsTab(QWidget):
     def set_mode(self, mode):
         self.mode = mode
         self._style_modes()
-        clips = mode == "Clips"
-        for b in (self.btn_new, self.btn_fill, self.btn_put, self.btn_import, self.btn_scan):
-            b.setVisible(clips)
-        self.btn_del.setVisible(clips)
         self.refresh_left()
 
     def _label_of(self, path):
@@ -198,85 +280,159 @@ class ClipsTab(QWidget):
             child.setForeground(0, QColor("#6b7785"))
         return child
 
+    def _knife_pixmap(self, name):
+        from app.core import timeremap
+        k = timeremap.load()["couteaux"].get(name) or {}
+        img = k.get("carte") or k.get("image")
+        pix = QPixmap(img) if img and Path(img).is_file() else None
+        return _rounded(pix) if pix is not None and not pix.isNull() else _symbol("🔪")
+
     def refresh_left(self):
-        """Redessine la liste de gauche selon le mode choisi."""
-        self.tree.clear()
+        """Redessine la partie gauche selon le mode choisi."""
         if self.mode == "Clips":
-            for name in sorted(self.folders, key=str.lower):
-                top = QTreeWidgetItem(self.tree, [f"🔪 {name}  ({len(self.folders[name])})"])
-                top.setData(0, ROLE_DIR, name)
-                for c in self.folders[name]:
-                    self._clip_child(top, c)
-            if self.found_paths:
-                top = QTreeWidgetItem(self.tree, [f"🔎 {FOUND}  ({len(self.found_paths)})"])
-                top.setData(0, ROLE_DIR, FOUND)
-                for c in self.found_paths:
-                    self._clip_child(top, c)
-            if not self.folders and not self.found_paths:
-                self.status.setText("Crée un dossier par couteau avec « Nouveau dossier », puis ajoute ses clips.")
+            self._fill_grid()
+            if self.knife in self.folders:
+                self._fill_knife()
+                self.left_stack.setCurrentIndex(1)
+            else:
+                self.knife = None
+                self.left_stack.setCurrentIndex(0)
+                self.status.setText("" if self.folders else
+                                    "Crée une carte par couteau avec « Nouveau couteau », puis ajoute ses clips.")
         else:
+            self.tree.clear()
             st = self.project.kunai if self.mode == "Kunai" else self.project.dash
-            videos = st.videos
             for side, icon in (("gauche", "✋"), ("droite", "🤚")):
                 lst = getattr(st, side)
                 top = QTreeWidgetItem(self.tree, [f"{icon} {self.mode} main {side}  ({len(lst)})"])
                 top.setData(0, ROLE_DIR, f"{self.mode} {side}")
                 for v in lst:
                     self._clip_child(top, v)
-            self.status.setText("" if videos else f"Aucune vidéo : ajoute-les dans l'onglet {self.mode}.")
-        self.tree.expandAll()
+            self.tree.expandAll()
+            self.left_stack.setCurrentIndex(2)
+            self.status.setText("" if st.videos else f"Aucune vidéo : ajoute-les dans l'onglet {self.mode}.")
         for i in range(self.order.count()):       # met à jour les préfixes
             it = self.order.item(i)
             it.setText(self._order_item(it.data(ROLE)).text())
 
-    def _selected_paths(self):
-        """Clips sélectionnés ; un dossier sélectionné = tous ses clips."""
-        out = []
-        for it in self.tree.selectedItems():
-            if it.data(0, ROLE):
-                out.append(it.data(0, ROLE))
-            else:
-                out += [it.child(i).data(0, ROLE) for i in range(it.childCount())]
-        seen = set()
-        return [p for p in out if not (p in seen or seen.add(p))]
+    def _fill_grid(self):
+        self.grid.clear()
+        new = QListWidgetItem(QIcon(_symbol("＋", 34)), "Nouveau couteau")
+        new.setData(ROLE_DIR, NEW)
+        new.setSizeHint(QSize(CARD_W + 16, CARD_H + 46))
+        self.grid.addItem(new)
+        for name in sorted(self.folders, key=str.lower):
+            clips = self.folders[name]
+            free = sum(1 for c in clips if c not in self.project.clips)
+            it = QListWidgetItem(QIcon(self._knife_pixmap(name)), name)
+            it.setData(ROLE_DIR, name)
+            it.setToolTip(f"{name} — {len(clips)} clip(s), {free} pas encore dans l'edit")
+            it.setSizeHint(QSize(CARD_W + 16, CARD_H + 46))
+            self.grid.addItem(it)
+        self._filter(self.filter.text())
 
-    def _selected_folder(self):
-        for it in self.tree.selectedItems():
-            top = it if it.data(0, ROLE_DIR) else it.parent()
-            if top is not None and top.data(0, ROLE_DIR) in self.folders:
-                return top.data(0, ROLE_DIR)
-        return None
+    def _filter(self, text):
+        t = text.strip().lower()
+        for i in range(self.grid.count()):
+            it = self.grid.item(i)
+            it.setHidden(bool(t) and it.data(ROLE_DIR) != NEW and t not in it.text().lower())
+
+    def _card_clicked(self, item):
+        if QApplication.keyboardModifiers() & (Qt.KeyboardModifier.ControlModifier |
+                                               Qt.KeyboardModifier.ShiftModifier):
+            return                                 # Ctrl/Maj : sélection de plusieurs couteaux
+        name = item.data(ROLE_DIR)
+        if name == NEW:
+            self.new_folder()
+        else:
+            self.open_knife(name)
+
+    def open_knife(self, name):
+        self.knife = name
+        self._fill_knife()
+        self.left_stack.setCurrentIndex(1)
+
+    def close_knife(self):
+        self.knife = None
+        self.refresh_left()
+
+    def _fill_knife(self):
+        name = self.knife
+        clips = self.folders.get(name, [])
+        self.knife_title.setText(f"{name}\n{len(clips)} clip(s)")
+        self.knife_img.setPixmap(self._knife_pixmap(name))
+        self.clips.clear()
+        for c in clips:
+            used = c in self.project.clips
+            it = QListWidgetItem(("✓ déjà dans l'edit — " if used else "") + _name(c))
+            it.setData(ROLE, c)
+            it.setToolTip(c)
+            if used:
+                it.setForeground(QColor("#6b7785"))
+            self.clips.addItem(it)
+        self.status.setText("Double-clique un clip (ou sélectionne-les puis « Ajouter → »)."
+                            if clips else "Aucun clip : clique « Ajouter des clips... ».")
+
+    def _selected_paths(self):
+        """Clips sélectionnés ; une carte de couteau sélectionnée = tous ses clips."""
+        out = []
+        if self.mode == "Clips":
+            if self.left_stack.currentIndex() == 1:
+                out = [it.data(ROLE) for it in self.clips.selectedItems()]
+            else:
+                for it in self.grid.selectedItems():
+                    out += self.folders.get(it.data(ROLE_DIR), [])
+        else:
+            for it in self.tree.selectedItems():
+                if it.data(0, ROLE):
+                    out.append(it.data(0, ROLE))
+                else:
+                    out += [it.child(i).data(0, ROLE) for i in range(it.childCount())]
+        seen = set()
+        return [p for p in out if p and not (p in seen or seen.add(p))]
 
     def _double(self, item, _col):
         if item.data(0, ROLE):
             self.add_to_edit([item.data(0, ROLE)])
 
-    # ----------------------------------------------------------- dossiers
+    # ----------------------------------------------------------- couteaux
     def _save_folders(self):
         proj.save_clip_folders(self.folders)
         self.refresh_left()
 
     def new_folder(self):
-        name, ok = QInputDialog.getText(self, "Nouveau dossier", "Nom du couteau (ex. Kuronami, Reaver...) :")
+        name, ok = QInputDialog.getText(self, "Nouveau couteau", "Nom du couteau (ex. Oni Claw, Reaver...) :")
         name = name.strip()
         if not ok or not name:
             return
-        if name in self.folders or name == FOUND:
-            self.status.setText(f"Le dossier « {name} » existe déjà.")
+        if name in self.folders:
+            self.status.setText(f"Le couteau « {name} » existe déjà.")
             return
         self.folders[name] = []
-        self._save_folders()
-        self.status.setText(f"Dossier « {name} » créé. Ajoute-lui des clips.")
+        proj.save_clip_folders(self.folders)
+        self.open_knife(name)
+        self._fill_grid()
+        self.pick_knife_image()
 
-    def _ask_folder(self, title):
-        names = sorted(self.folders, key=str.lower)
-        if not names:
-            self.status.setText("Crée d'abord un dossier (couteau).")
-            return None
-        current = self._selected_folder()
-        name, ok = QInputDialog.getItem(self, title, "Dossier :", names,
-                                        names.index(current) if current in names else 0, False)
-        return name if ok else None
+    def pick_knife_image(self):
+        if not self.knife:
+            return
+        f, _ = QFileDialog.getOpenFileName(self, f"Image du couteau « {self.knife} »", "",
+                                           "Images (*.png *.jpg *.jpeg *.bmp *.webp)")
+        if not f:
+            return
+        import shutil
+        from app.core import timeremap
+        cfg = timeremap.load()
+        target = timeremap.knife_dir() / (proj_safe(self.knife) + "_carte" + Path(f).suffix.lower())
+        try:
+            shutil.copyfile(f, target)
+            f = str(target)
+        except OSError:
+            pass
+        cfg["couteaux"].setdefault(self.knife, {})["carte"] = f      # image de la carte (≠ image de détection)
+        timeremap.save(cfg)
+        self.refresh_left()
 
     def _store(self, name, paths):
         """Copie les clips dans la bibliothèque d'AuraEdit (Documents/AuraEdit/Clips/<couteau>)."""
@@ -303,25 +459,16 @@ class ClipsTab(QWidget):
         new = [p for p in stored if p not in clips]
         clips += new
         self._save_folders()
-        self.status.setText(f"{len(new)} clip(s) sauvegardé(s) dans le dossier « {name} ».")
+        self.status.setText(f"{len(new)} clip(s) sauvegardé(s) dans « {name} ».")
 
     def fill_folder(self):
-        name = self._selected_folder() or self._ask_folder("Ajouter des clips")
+        name = self.knife
         if not name:
             return
         files, _ = QFileDialog.getOpenFileNames(self, f"Clips pour « {name} »", "",
                                                 file_filter("Vidéos", proj.VIDEO_EXT))
         if files:
             self._add_to_folder(name, files)
-
-    def put_in_folder(self):
-        paths = self._selected_paths()
-        if not paths:
-            self.status.setText("Sélectionne d'abord des clips.")
-            return
-        name = self._ask_folder("Mettre dans un dossier")
-        if name:
-            self._add_to_folder(name, paths)
 
     def import_folder(self):
         """Un dossier du PC : chaque sous-dossier devient un couteau (ou le dossier lui-même)."""
@@ -341,65 +488,33 @@ class ClipsTab(QWidget):
             clips += new
             total += len(new)
         self._save_folders()
-        self.status.setText(f"{total} clip(s) importé(s) dans {len(groups)} dossier(s).")
+        self.status.setText(f"{total} clip(s) importé(s) dans {len(groups)} couteau(x).")
 
-    def delete_selected(self):
-        """Supprime les dossiers sélectionnés, ou retire des clips d'un dossier (les fichiers restent sur le PC)."""
-        items = self.tree.selectedItems()
-        if not items:
+    def remove_from_knife(self):
+        if not self.knife:
             return
-        folders = [it.data(0, ROLE_DIR) for it in items if it.data(0, ROLE_DIR) in self.folders]
-        if folders and QMessageBox.question(
-                self, "Supprimer", f"Supprimer {len(folders)} dossier(s) ? (tes vidéos restent sur le PC)"
-        ) != QMessageBox.StandardButton.Yes:
-            return
-        for f in folders:
-            self.folders.pop(f, None)
-        for it in items:
-            p, parent = it.data(0, ROLE), it.parent()
-            if p and parent is not None:
-                name = parent.data(0, ROLE_DIR)
-                if name in self.folders and p in self.folders[name]:
-                    self.folders[name].remove(p)
-                elif name == FOUND and p in self.found_paths:
-                    self.found_paths.remove(p)
+        for it in self.clips.selectedItems():
+            p = it.data(ROLE)
+            if p in self.folders[self.knife]:
+                self.folders[self.knife].remove(p)
         self._save_folders()
 
-    # ---------------------------------------------------------- recherche
-    def showEvent(self, event):
-        super().showEvent(event)
-        if not self.scanned_once and not self.folders:
-            self.scanned_once = True
-            folders = proj.default_clip_folders()
-            if folders:
-                self.scan(folders)
-
-    def scan(self, folders):
-        if self.scan_thread is not None and self.scan_thread.isRunning():
+    def delete_knife(self):
+        if not self.knife:
             return
-        if not folders:
-            self.status.setText("Aucun dossier Vidéos trouvé : utilise « Importer un dossier du PC ».")
+        if QMessageBox.question(self, "Supprimer", f"Supprimer le couteau « {self.knife} » ?\n"
+                                "(les vidéos restent dans Documents/AuraEdit/Clips)") \
+                != QMessageBox.StandardButton.Yes:
             return
-        self.btn_scan.setEnabled(False)
-        self.status.setText("Recherche des clips sur ton PC...")
-        self.scan_thread = ScanThread([str(f) for f in folders], self)
-        self.scan_thread.done.connect(self._scan_done)
-        self.scan_thread.start()
-
-    def _scan_done(self, paths):
-        known = set(self.found_paths)
-        new = [p for p in paths if p not in known]
-        self.found_paths += new
-        self.btn_scan.setEnabled(True)
-        self.refresh_left()
-        self.status.setText(f"{len(new)} clip(s) trouvé(s). Range-les avec « Mettre dans un dossier »."
-                            if paths else "Aucune vidéo trouvée.")
+        self.folders.pop(self.knife, None)
+        self.knife = None
+        self._save_folders()
 
     # -------------------------------------------------------------- ordre
     def add_selected(self):
         paths = self._selected_paths()
         if not paths:
-            self.status.setText("Sélectionne d'abord des clips (ou un dossier entier) à gauche.")
+            self.status.setText("Ouvre un couteau et sélectionne des clips (ou sélectionne des cartes avec Ctrl).")
             return
         self.add_to_edit(paths)
 
@@ -490,6 +605,9 @@ class ClipsTab(QWidget):
         self.count.setText(f"{n} clip(s) dans l'edit" if n else "Aucun clip dans l'edit pour l'instant.")
 
     def stop(self):
-        if self.scan_thread is not None and self.scan_thread.isRunning():
-            self.scan_thread.cancel()
-            self.scan_thread.wait(3000)
+        pass
+
+
+def proj_safe(name):
+    import re
+    return re.sub(r'[<>:"/\\|?*]', "_", name)

@@ -13,9 +13,9 @@ from version import __version__
 from .style import RED, asset
 
 WHATS_NEW = [
+    "Couteaux présentés en cartes avec leur image, et filtre",
     "Clips sauvegardés dans AuraEdit, chacun utilisé une seule fois par edit",
-    "Time remap de chaque clip gardé pour tous tes projets",
-    "Time remap : keyframe 1 trouvée juste après le kill",
+    "Plus de recherche automatique des clips sur le PC",
 ]
 
 
