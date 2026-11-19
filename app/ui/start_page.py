@@ -13,9 +13,9 @@ from version import __version__
 from .style import RED, asset
 
 WHATS_NEW = [
+    "Frise de la musique : moments des clips, dash et kunais",
+    "Audio de claps créé automatiquement depuis tes sound kills (et relu par le logiciel)",
     "Pixel Motion réparé, plus rapide, + bouton Aperçu dans le time remap",
-    "Glisse tes clips depuis l'Explorateur directement dans un couteau",
-    "Frame blending corrigé comme After Effects",
 ]
 
 

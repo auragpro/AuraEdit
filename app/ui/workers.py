@@ -181,3 +181,22 @@ class RenderThread(QThread):
             self.failed.emit(str(e) or e.__class__.__name__)
             return
         self.done.emit(res)
+
+
+class FuncThread(QThread):
+    """Lance une fonction longue en arrière-plan. fn(progress) -> résultat."""
+    progress = pyqtSignal(str, float)
+    done = pyqtSignal(object)
+    failed = pyqtSignal(str)
+
+    def __init__(self, fn, parent=None):
+        super().__init__(parent)
+        self.fn = fn
+
+    def run(self):
+        try:
+            res = self.fn(lambda txt, frac: self.progress.emit(str(txt), float(frac)))
+        except Exception as e:
+            self.failed.emit(str(e) or e.__class__.__name__)
+            return
+        self.done.emit(res)

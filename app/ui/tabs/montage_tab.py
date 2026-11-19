@@ -108,7 +108,8 @@ class MontageTab(QWidget):
             return f"✓ gauche {len(st.gauche)} · droite {len(st.droite)}"
         info = {
             "Intro": ("✓ " + name(p.intro)) if p.intro else "✗ à choisir",
-            "Musique": ("✓ " + name(p.music)) if p.music else "✗ à choisir",
+            "Musique": (f"✓ {len(p.markers)} moment(s)" if p.markers else "✓ " + name(p.music))
+                       if p.music else "✗ à choisir",
             "Clips": f"✓ {len(p.clips)} clip(s)" if p.clips else "✗ aucun clip",
             "Kunai": hands(p.kunai),
             "Dash": hands(p.dash),
