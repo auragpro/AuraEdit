@@ -1,3 +1,14 @@
+## Nouveautés de la version 0.7.6
+
+- **Nouveau carré « 🎞 Reproduire » dans Montage** : refais un edit fini avec tes propres clips.
+  1. Choisis l'edit : l'app trouve **toutes les transitions**.
+  2. S'il en manque une, place-toi dessus avec le curseur ou **◀ -1 / +1 ▶** et clique **« ➕ Transition ici »**. Une transition en trop se supprime.
+  3. Ensuite, **plan par plan**, tu vois le plan de l'edit et tu choisis : clique un couteau et l'app prend **un de ses clips au hasard**, ceux avec le time remap déjà fait en premier. **Re-clique** pour en avoir un autre. Dash et Kunai sont aussi proposés.
+  4. À la fin, les clips sont mis dans l'ordre dans **Clips**.
+- **Time remap : courbes enregistrées** comme dans Flow.
+  - Elles s'affichent en petites images : un clic applique la courbe.
+  - **« 💾 Enregistrer la courbe »** garde ta courbe actuelle sous un nom, et 🗑 la supprime.
+
 ## Nouveautés de la version 0.7.5
 
 - **Time remap : la durée du ralenti (1 → 2) et la durée du retour (2 → 3) sont maintenant propres à chaque clip.**

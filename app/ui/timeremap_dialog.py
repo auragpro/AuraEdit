@@ -1,11 +1,11 @@
 """Page « Time remap » ouverte à chaque clip ajouté : quel couteau, keyframes détectées, courbes."""
 from pathlib import Path
 
-from PyQt6.QtCore import QPointF, QRectF, Qt, QThread, pyqtSignal
-from PyQt6.QtGui import QColor, QPainter, QPainterPath, QPen, QPixmap
+from PyQt6.QtCore import QPointF, QRectF, QSize, Qt, QThread, pyqtSignal
+from PyQt6.QtGui import QColor, QIcon, QPainter, QPainterPath, QPen, QPixmap
 from PyQt6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDoubleSpinBox, QFileDialog, QFrame, QGridLayout,
-                             QHBoxLayout, QLabel, QLineEdit, QPushButton, QSlider, QSpinBox, QVBoxLayout,
-                             QWidget)
+                             QHBoxLayout, QInputDialog, QLabel, QLineEdit, QListWidget, QListWidgetItem,
+                             QPushButton, QSlider, QSpinBox, QVBoxLayout, QWidget)
 
 from app.core import timeremap as tr
 
@@ -266,6 +266,29 @@ class TimeRemapDialog(QDialog):
         settings.addLayout(grid, 1)
         settings.addWidget(self.preview, 1)
 
+        # --- courbes enregistrées (comme Flow) : un clic applique la courbe
+        self.presets = QListWidget()
+        self.presets.setViewMode(QListWidget.ViewMode.IconMode)
+        self.presets.setIconSize(QSize(84, 52))
+        self.presets.setGridSize(QSize(100, 82))
+        self.presets.setFlow(QListWidget.Flow.LeftToRight)
+        self.presets.setWrapping(False)
+        self.presets.setFixedHeight(100)
+        self.presets.setMovement(QListWidget.Movement.Static)
+        self.presets.itemClicked.connect(self._apply_preset)
+        b_save_c = QPushButton("💾 Enregistrer la courbe")
+        b_save_c.clicked.connect(self._save_preset)
+        b_del_c = QPushButton("🗑")
+        b_del_c.setToolTip("Supprimer la courbe enregistrée sélectionnée")
+        b_del_c.clicked.connect(self._del_preset)
+        prow = QHBoxLayout()
+        prow.addWidget(self.presets, 1)
+        pcol = QVBoxLayout()
+        pcol.addWidget(b_save_c)
+        pcol.addWidget(b_del_c)
+        prow.addLayout(pcol)
+        self._fill_presets()
+
         # --- boutons
         self.b_ok = QPushButton("Valider ce time remap")
         self.b_ok.setObjectName("primary")
@@ -303,6 +326,7 @@ class TimeRemapDialog(QDialog):
         lay.addLayout(frames)
         lay.addLayout(killrow)
         lay.addLayout(settings)
+        lay.addLayout(prow)
         lay.addLayout(brow)
 
         self._knife_changed()
@@ -397,6 +421,54 @@ class TimeRemapDialog(QDialog):
         self.k1.setup(n, int(round(start * tr.FPS)))
         self.k2.setup(n, int(round(end * tr.FPS)))
         self.b_ok.setEnabled(True)
+
+    # ------------------------------------------------- courbes enregistrées
+    def _fill_presets(self):
+        self.presets.clear()
+        perso = tr.load().get("courbes_perso") or []
+        for k, c in enumerate(tr.COURBES_BASE + perso):
+            w = CurvePreview()
+            w.setMinimumSize(84, 52)
+            w.resize(84, 52)
+            w.set_curves(c["c1"], c["c2"])
+            it = QListWidgetItem(QIcon(w.grab()), c["nom"])
+            it.setData(Qt.ItemDataRole.UserRole, (c, k >= len(tr.COURBES_BASE)))
+            self.presets.addItem(it)
+
+    def _apply_preset(self, item):
+        c, _ = item.data(Qt.ItemDataRole.UserRole)
+        self.c1.setText(tr.curve_text(c["c1"]))
+        self.c2.setText(tr.curve_text(c["c2"]))
+
+    def _save_preset(self):
+        c1, c2 = tr.parse_curve(self.c1.text()), tr.parse_curve(self.c2.text())
+        if not (c1 and c2):
+            self.status.setText("Courbe illisible : écris 4 nombres, ex. 0.39, 0.59, 0.26, 1")
+            return
+        name, ok = QInputDialog.getText(self, "Enregistrer la courbe", "Nom de la courbe :")
+        if not ok or not name.strip():
+            return
+        base = tr.load()
+        perso = [c for c in base.get("courbes_perso") or [] if c.get("nom") != name.strip()]
+        perso.append({"nom": name.strip(), "c1": c1, "c2": c2})
+        base["courbes_perso"] = perso
+        tr.save(base)
+        self.cfg["courbes_perso"] = perso
+        self._fill_presets()
+
+    def _del_preset(self):
+        it = self.presets.currentItem()
+        if it is None:
+            return
+        c, perso_ok = it.data(Qt.ItemDataRole.UserRole)
+        if not perso_ok:
+            self.status.setText("Les courbes de base ne se suppriment pas.")
+            return
+        base = tr.load()
+        base["courbes_perso"] = [x for x in base.get("courbes_perso") or [] if x.get("nom") != c["nom"]]
+        tr.save(base)
+        self.cfg["courbes_perso"] = base["courbes_perso"]
+        self._fill_presets()
 
     # ---------------------------------------------------------- réglages
     def _curves(self, *_):

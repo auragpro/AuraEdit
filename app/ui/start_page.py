@@ -13,8 +13,9 @@ from version import __version__
 from .style import RED, asset
 
 WHATS_NEW = [
-    "Durée du ralenti et du retour réglables clip par clip",
-    "Changer un clip ne touche plus les autres"]
+    "Nouveau : « Reproduire » un edit fini avec tes clips",
+    "Toutes les transitions détectées, ajout manuel à la frame près",
+    "Courbes de time remap enregistrables (comme Flow)"]
 
 
 def ago(ts):

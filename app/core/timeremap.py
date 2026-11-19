@@ -34,7 +34,13 @@ DEFAULTS = {
     "mode_v2": False,          # passage automatique au Pixel Motion (une seule fois)
     "couteaux": {},            # {nom: {"image": chemin, "duree": secondes entre début et fin}}
     "kunai_reglages": {},      # réglages propres aux kunais (courbes, durées, blending, durée apprise)
+    "courbes_perso": [],       # courbes enregistrées : [{"nom", "c1", "c2"}]
 }
+COURBES_BASE = [
+    {"nom": "Par défaut", "c1": [0.39, 0.59, 0.26, 1.0], "c2": [0.33, 0.0, 0.74, 0.8]},
+    {"nom": "Linéaire", "c1": [0.0, 0.0, 1.0, 1.0], "c2": [0.0, 0.0, 1.0, 1.0]},
+    {"nom": "Doux", "c1": [0.33, 0.0, 0.67, 1.0], "c2": [0.33, 0.0, 0.67, 1.0]},
+]
 KUNAI_KEYS = ("courbe1", "courbe2", "duree_ralenti", "frames_retour", "blending", "blending_mode")
 
 

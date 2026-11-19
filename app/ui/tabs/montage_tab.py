@@ -16,7 +16,7 @@ from .shake_tab import ShakeTab
 
 PARTS = [("Intro", IntroTab), ("Musique", MusicTab), ("Clips", ClipsTab),
          ("Kunai", KunaiTab), ("Dash", DashTab), ("Shake", ShakeTab)]
-ICONS = {"Intro": "🎬", "Musique": "🎵", "Clips": "🔪", "Kunai": "🗡", "Dash": "💨", "Shake": "💥", "Générer": "▶"}
+ICONS = {"Intro": "🎬", "Musique": "🎵", "Clips": "🔪", "Kunai": "🗡", "Dash": "💨", "Shake": "💥", "Reproduire": "🎞", "Générer": "▶"}
 
 TILE_CSS = f"""
 QPushButton {{ background: {PANEL}; border: 2px solid {PANEL_2}; border-radius: 14px;
@@ -41,7 +41,7 @@ class MontageTab(QWidget):
         grid_page = QWidget()
         grid = QGridLayout()
         grid.setSpacing(18)
-        names = [n for n, _ in PARTS] + ["Générer"]
+        names = [n for n, _ in PARTS] + ["Reproduire", "Générer"]
         for i, name in enumerate(names):
             b = QPushButton()
             b.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
@@ -50,6 +50,8 @@ class MontageTab(QWidget):
             b.setStyleSheet(GEN_CSS if name == "Générer" else TILE_CSS)
             if name == "Générer":
                 b.clicked.connect(self.render_requested.emit)
+            elif name == "Reproduire":
+                b.clicked.connect(self.reproduce)
             else:
                 b.clicked.connect(lambda _=False, n=name: self.open(n))
             self.tiles[name] = b
@@ -115,6 +117,7 @@ class MontageTab(QWidget):
             "Kunai": hands(p.kunai),
             "Dash": hands(p.dash),
             "Shake": self.parts["Shake"].summary() if "Shake" in self.parts else "",
+            "Reproduire": "copier un edit fini",
             "Générer": "rendu MP4",
         }
         for n, b in self.tiles.items():
@@ -123,6 +126,18 @@ class MontageTab(QWidget):
             if len(sub) > 34:
                 sub = sub[:32] + "…"
             b.setText(f"{ICONS[n]}\n{label}\n{sub}")
+
+    def reproduce(self):
+        from ..reproduce_dialog import ReproduceDialog
+        if ReproduceDialog(self.project, self).exec():
+            clips = self.parts["Clips"]
+            clips.order.clear()
+            for c in self.project.clips:
+                clips.order.addItem(clips._order_item(c))
+            clips.sync()
+            clips.refresh_left()
+            self.open("Clips")
+            self._changed()
 
     def stop(self):
         for page in self.parts.values():
