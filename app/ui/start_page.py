@@ -13,9 +13,9 @@ from version import __version__
 from .style import RED, asset
 
 WHATS_NEW = [
+    "Frame blending corrigé comme After Effects, + mode Pixel Motion",
     "Couteaux présentés en cartes avec leur image, et filtre",
     "Clips sauvegardés dans AuraEdit, chacun utilisé une seule fois par edit",
-    "Plus de recherche automatique des clips sur le PC",
 ]
 
 

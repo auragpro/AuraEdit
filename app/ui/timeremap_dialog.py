@@ -207,8 +207,10 @@ class TimeRemapDialog(QDialog):
         self.back.setRange(1, 120)
         self.back.setSuffix(" frames")
         self.back.setValue(int(self.cfg["frames_retour"]))
-        self.blend = QCheckBox("Frame blending (ralenti fluide)")
-        self.blend.setChecked(bool(self.cfg["blending"]))
+        self.blend = QComboBox()
+        for key, label in tr.BLEND_MODES.items():
+            self.blend.addItem(label, key)
+        self.blend.setCurrentIndex(list(tr.BLEND_MODES).index(tr.blend_mode(self.cfg)))
         self.preview = CurvePreview()
         self._curves()
         grid = QGridLayout()
@@ -220,7 +222,8 @@ class TimeRemapDialog(QDialog):
         grid.addWidget(self.slow, 2, 1)
         grid.addWidget(QLabel("Durée du retour (2 → 3)"), 3, 0)
         grid.addWidget(self.back, 3, 1)
-        grid.addWidget(self.blend, 4, 0, 1, 2)
+        grid.addWidget(QLabel("Frame blending"), 4, 0)
+        grid.addWidget(self.blend, 4, 1)
         settings = QHBoxLayout()
         settings.addLayout(grid, 1)
         settings.addWidget(self.preview, 1)
@@ -345,7 +348,8 @@ class TimeRemapDialog(QDialog):
             self.cfg["courbe2"] = c2
         self.cfg["duree_ralenti"] = self.slow.value()
         self.cfg["frames_retour"] = self.back.value()
-        self.cfg["blending"] = self.blend.isChecked()
+        self.cfg["blending_mode"] = self.blend.currentData()
+        self.cfg["blending"] = self.cfg["blending_mode"] != "off"
 
     def validate(self):
         start, end = self.k1.seconds(), self.k2.seconds()

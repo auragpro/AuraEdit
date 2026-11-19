@@ -30,6 +30,7 @@ DEFAULTS = {
     "duree_ralenti": 1.0,      # secondes entre la keyframe 1 et la 2
     "frames_retour": 6,        # frames entre la keyframe 2 et la 3 (le reverse)
     "blending": True,
+    "blending_mode": "mix",    # "mix" (Frame Mix), "motion" (Pixel Motion) ou "off"
     "couteaux": {},            # {nom: {"image": chemin, "duree": secondes entre début et fin}}
 }
 
@@ -272,60 +273,116 @@ def save_knife_image(name, path, t):
 
 # ----------------------------------------------------------------- rendu ----
 
+BLEND_MODES = {"mix": "Frame Mix (comme After Effects)",
+               "motion": "Pixel Motion (le plus fluide, plus lent)",
+               "off": "Aucun"}
+
+
+def blend_mode(cfg):
+    m = cfg.get("blending_mode")
+    if m in BLEND_MODES:
+        return m
+    return "mix" if cfg.get("blending", True) else "off"
+
+
+def source_fps(path):
+    """Images par seconde réelles du clip (pour ne pas dupliquer d'images)."""
+    out = subprocess.run([audio.ffmpeg_exe(), "-hide_banner", "-i", str(path)], capture_output=True,
+                         creationflags=audio._NO_WINDOW).stderr.decode("utf-8", "replace")
+    for line in out.splitlines():
+        if "Video:" in line:
+            m = re.search(r"(\d+(?:\.\d+)?) fps", line) or re.search(r"(\d+(?:\.\d+)?) tbr", line)
+            if m:
+                f = float(m.group(1))
+                if 10 <= f <= 400:
+                    return f
+    return 60.0
+
+
 def render(path, start, end, cfg, output, is_cancelled=None):
-    """Fabrique la partie time-remappée du clip (1920x1080, 60 i/s, sans son)."""
+    """Fabrique la partie time-remappée du clip (1920x1080, 60 i/s, sans son).
+
+    Frame Mix : chaque image de sortie = mélange des 2 images source voisines (comme After Effects).
+    Pixel Motion : le clip est d'abord interpolé par flux optique (images intermédiaires calculées)."""
     t1, t2 = timing(cfg)
     total = t1 + t2
     n_out = max(2, int(round(total * FPS)) + 1)
-    blending = bool(cfg.get("blending", True))
+    mode = blend_mode(cfg)
+    times = [source_time(min(k / FPS, total), start, end, cfg) for k in range(n_out)]
 
-    # instants source nécessaires pour chaque frame de sortie
-    sub = 7 if blending else 1
-    plan = []
-    for k in range(n_out):
-        tau = min(k / FPS, total)
-        if blending:
-            taus = [min(max(tau + (j / (sub - 1) - 0.5) / FPS, 0), total) for j in range(sub)]
+    sfps = source_fps(path)
+    rate = sfps * (4 if mode == "motion" else 1)           # images par seconde après interpolation
+    lo = max(0.0, min(times) - 2 / sfps)
+    hi = max(times) + 2 / sfps
+    pos = [(s - lo) * rate for s in times]
+    needed = set()
+    for x in pos:
+        i = int(x)
+        if mode == "off":
+            needed.add(int(round(x)))
         else:
-            taus = [tau]
-        plan.append([source_time(x, start, end, cfg) for x in taus])
+            needed.update((i, i + 1))
+    last_needed = max(needed)
 
-    lo = max(0.0, min(min(p) for p in plan) - 2 / FPS)
-    hi = max(max(p) for p in plan) + 2 / FPS
-    vf = (f"fps={FPS},scale={W}:{H}:force_original_aspect_ratio=decrease,"
-          f"pad={W}:{H}:(ow-iw)/2:(oh-ih)/2,setsar=1")
-    frames = _decode(["-ss", f"{lo:.3f}", "-i", str(path), "-t", f"{hi - lo:.3f}", "-an", "-vf", vf],
-                     W * H * 3)
-    if not len(frames):
+    vf = f"fps={sfps:g}"
+    if mode == "motion":
+        vf += f",minterpolate=fps={rate:g}:mi_mode=mci:mc_mode=aobmc:me_mode=bidir:vsbmc=1"
+    vf += f",scale={W}:{H}:force_original_aspect_ratio=decrease,pad={W}:{H}:(ow-iw)/2:(oh-ih)/2,setsar=1"
+    size = W * H * 3
+    frames = {}
+    dec = subprocess.Popen([audio.ffmpeg_exe(), "-hide_banner", "-loglevel", "error", "-ss", f"{lo:.4f}",
+                            "-i", str(path), "-t", f"{hi - lo:.4f}", "-an", "-vf", vf,
+                            "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
+                           stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, creationflags=audio._NO_WINDOW)
+    idx, lastframe = 0, None
+    try:
+        while idx <= last_needed:                  # on ne garde que les images utiles (peu de mémoire)
+            if is_cancelled and is_cancelled():
+                raise InterruptedError()
+            buf = dec.stdout.read(size)
+            if len(buf) < size:
+                break
+            if idx in needed:
+                frames[idx] = np.frombuffer(buf, dtype=np.uint8)
+            lastframe = idx
+            idx += 1
+    finally:
+        dec.kill()
+        dec.wait()
+    if not frames:
         raise ValueError(f"Impossible de lire {Path(path).name}")
-    last = len(frames) - 1
+    avail = sorted(frames)
+
+    def frame(i):
+        if i in frames:
+            return frames[i]
+        return frames[min(avail, key=lambda a: abs(a - i))]
 
     with tempfile.TemporaryFile() as err:
         enc = subprocess.Popen([audio.ffmpeg_exe(), "-y", "-hide_banner", "-f", "rawvideo", "-pix_fmt", "rgb24",
                                 "-s", f"{W}x{H}", "-r", str(FPS), "-i", "-", "-c:v", "libx264", "-preset",
-                                "veryfast", "-crf", "18", "-pix_fmt", "yuv420p", str(output)],
+                                "veryfast", "-crf", "16", "-pix_fmt", "yuv420p", str(output)],
                                stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=err,
                                creationflags=audio._NO_WINDOW)
         try:
-            for times in plan:
+            for x in pos:
                 if is_cancelled and is_cancelled():
                     raise InterruptedError()
-                weights = {}
-                for s in times:                       # mélange des frames voisines
-                    x = min(max((s - lo) * FPS, 0), last)
+                x = min(max(x, 0.0), float(lastframe if lastframe is not None else 0))
+                if mode == "off":
+                    img = frame(int(round(x)))
+                else:
                     i = int(x)
                     f = x - i
-                    weights[i] = weights.get(i, 0) + (1 - f)
-                    if f > 0 and i + 1 <= last:
-                        weights[i + 1] = weights.get(i + 1, 0) + f
-                tot = sum(weights.values())
-                if len(weights) == 1:
-                    img = frames[next(iter(weights))]
-                else:
-                    acc = np.zeros(W * H * 3, dtype=np.float32)
-                    for i, w in weights.items():
-                        acc += frames[i].astype(np.float32) * (w / tot)
-                    img = np.clip(acc + 0.5, 0, 255).astype(np.uint8)
+                    if f < 0.02 or (i + 1) not in frames:
+                        img = frame(i)
+                    elif f > 0.98:
+                        img = frame(i + 1)
+                    else:                          # Frame Mix : 2 images voisines seulement
+                        a = frame(i).astype(np.float32)
+                        a *= 1 - f
+                        a += frame(i + 1).astype(np.float32) * f
+                        img = np.clip(a + 0.5, 0, 255).astype(np.uint8)
                 enc.stdin.write(img.tobytes())
             enc.stdin.close()
         except (InterruptedError, BrokenPipeError, OSError):

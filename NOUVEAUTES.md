@@ -1,7 +1,7 @@
-## Nouveautés de la version 0.5.3
+## Nouveautés de la version 0.5.4
 
-- **Nouvelle présentation des couteaux** dans l'onglet Clips : une grille de **cartes** avec l'image et le nom de chaque couteau, et une barre **« Filtrer les couteaux... »** au-dessus.
-- La 1re carte **« ＋ Nouveau couteau »** crée un couteau et te demande directement son image.
-- **Clique sur une carte** pour ouvrir le couteau : son image, ses clips, et les boutons « Ajouter des clips... », « Image du couteau... », « Retirer du couteau » et « Supprimer le couteau ». « ←  Couteaux » pour revenir à la grille.
-- Double-clique un clip pour l'ajouter à l'edit. Avec Ctrl, tu peux sélectionner plusieurs cartes et ajouter tous leurs clips d'un coup.
-- **Recherche automatique des clips sur le PC supprimée** (plus de « Trouvés sur le PC »). Tu ajoutes tes clips toi-même dans chaque couteau, ou avec « Importer un dossier du PC... ».
+- **Frame blending corrigé, comme After Effects.** Avant, le logiciel mélangeait trop d'images à la fois : ça faisait plein de « fantômes » du couteau et de la main. Maintenant, chaque image ne mélange que les **2 images voisines** (Frame Mix d'After Effects) : c'est net et fluide.
+- **Fini l'effet 30 fps** : le logiciel utilise les vraies images de ton clip au lieu de le convertir en 60 i/s avant le time remap (ce qui doublait les images d'un clip en 30 i/s).
+- **Nouveau mode « Pixel Motion »** (comme dans After Effects) : il calcule les images intermédiaires pour un ralenti encore plus fluide. Plus lent au rendu.
+- Choix dans la page Time remap → **Frame blending** : Frame Mix (par défaut), Pixel Motion ou Aucun.
+- Meilleure qualité d'image et beaucoup moins de mémoire utilisée pendant le rendu.
