@@ -13,9 +13,9 @@ from version import __version__
 from .style import RED, asset
 
 WHATS_NEW = [
+    "Change le time remap d'un clip directement dans Mes clips",
     "Bibliothèque « Mes clips » : tes clips sauvegardés pour tous tes projets",
     "Confirmation à chaque suppression de clip",
-    "Export plus rapide : Pixel Motion sur tous les cœurs du processeur",
 ]
 
 

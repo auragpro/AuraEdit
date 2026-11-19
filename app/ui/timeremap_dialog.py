@@ -174,7 +174,7 @@ class TimeRemapDialog(QDialog):
         self.cfg = tr.load()
         self.skip_all = False
         self.thread = None
-        old = project.remaps.get(path) or tr.clip_remaps().get(path) or {}
+        old = tr.clip_remaps().get(path) or project.remaps.get(path) or {}
 
         title = QLabel(f"Time remap — {Path(path).name}")
         title.setObjectName("h1")

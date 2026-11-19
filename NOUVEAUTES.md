@@ -1,6 +1,5 @@
-## Nouveautés de la version 0.6.4
+## Nouveautés de la version 0.6.5
 
-- **Nouvelle catégorie « BIBLIOTHÈQUE » → Mes clips** (en bas de la barre de gauche) : c'est là que tu ajoutes tes couteaux et tes clips (bouton ou glisser-déposer).
-- Tes clips sont **sauvegardés dans AuraEdit** et tu les retrouves **dans chaque nouveau projet**.
-- Dans **Montage → Clips**, tu choisis seulement les clips de ton edit : impossible de supprimer un clip ou un couteau de ta bibliothèque depuis là. Le lien « 📚 Bibliothèque » t'y emmène.
-- **Confirmation** à chaque suppression : supprimer un clip ou un couteau de la bibliothèque, retirer un clip de l'edit ou tout retirer.
+- **Time remap depuis la Bibliothèque** : dans Mes clips, ouvre un couteau puis **double-clique un clip** (ou bouton **⏱ Time remap...**) pour changer son remap : keyframes, courbes, frame blending, flou de mouvement.
+- Les clips qui ont déjà un remap sont marqués **⏱**.
+- Le remap modifié est **repris automatiquement** dans tes projets qui utilisent ce clip.

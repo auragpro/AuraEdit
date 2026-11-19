@@ -227,8 +227,13 @@ class ClipsTab(QWidget):
         self.clips = DropList("Glisse tes clips ici\n(depuis l'Explorateur Windows)")
         self.clips.files_dropped.connect(self._dropped_on_knife)
         self.clips.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
-        if not library:
+        if library:                                # bibliothèque : double-clic = régler le time remap
+            self.clips.itemDoubleClicked.connect(lambda it: self.open_remap([it.data(ROLE)]))
+        else:
             self.clips.itemDoubleClicked.connect(lambda it: self.add_to_edit([it.data(ROLE)]))
+        b_trlib = QPushButton("⏱ Time remap...")
+        b_trlib.setToolTip("Régler le time remap du clip sélectionné (gardé pour tous tes projets).")
+        b_trlib.clicked.connect(self.remap_library)
         info = QVBoxLayout()
         info.addWidget(self.knife_title)
         info.addWidget(b_img)
@@ -239,6 +244,7 @@ class ClipsTab(QWidget):
         krow = QVBoxLayout()
         krow.addWidget(b_fill)
         krow2 = QHBoxLayout()
+        krow2.addWidget(b_trlib)
         krow2.addWidget(b_rm)
         krow2.addWidget(b_delk)
         krow.addLayout(krow2)
@@ -272,7 +278,7 @@ class ClipsTab(QWidget):
         if library:
             b_lib.hide()
         else:
-            for b in (b_import, b_img, b_fill, b_rm, b_delk):
+            for b in (b_import, b_img, b_fill, b_rm, b_delk, b_trlib):
                 b.hide()
             for w in (self.grid, self.clips):
                 w.setAcceptDrops(False)
@@ -349,6 +355,12 @@ class ClipsTab(QWidget):
         """La bibliothèque a pu changer (autre onglet) : on recharge."""
         super().showEvent(event)
         self.folders = proj.load_clip_folders()
+        if not self.library:                       # time remap changé dans la bibliothèque : on le reprend
+            from app.core import timeremap
+            saved = timeremap.clip_remaps()
+            for c in self.project.clips:
+                if c in saved and self.project.remaps.get(c) != saved[c]:
+                    self.project.remaps[c] = saved[c]
         self.refresh_left()
 
     # ---------------------------------------------------------- affichage
@@ -500,9 +512,11 @@ class ClipsTab(QWidget):
         self.knife_title.setText(f"{name}\n{len(clips)} clip(s)")
         self.knife_img.setPixmap(self._knife_pixmap(name))
         self.clips.clear()
+        from app.core import timeremap
+        saved = timeremap.clip_remaps()
         for c in clips:
-            used = c in self.project.clips
-            it = QListWidgetItem(("✓ déjà dans l'edit — " if used else "") + _name(c))
+            used = c in self.project.clips and not self.library
+            it = QListWidgetItem(("⏱ " if c in saved else "") + ("✓ déjà dans l'edit — " if used else "") + _name(c))
             it.setData(ROLE, c)
             it.setToolTip(c)
             if used:
@@ -510,7 +524,7 @@ class ClipsTab(QWidget):
             self.clips.addItem(it)
         if self.library:
             self.status.setText("Glisse tes vidéos dans la liste, ou « Ajouter des clips... »." if not clips else
-                                "Sélectionne un clip puis « Supprimer le clip » pour l'enlever de ta bibliothèque.")
+                                "Double-clique un clip pour régler son time remap (⏱ = déjà réglé).")
         else:
             self.status.setText("Double-clique un clip (ou sélectionne-les puis « Ajouter → »)."
                                 if clips else "Aucun clip : ajoute-les dans la Bibliothèque « Mes clips ».")
@@ -714,6 +728,13 @@ class ClipsTab(QWidget):
             self.changed.emit()
             if dlg.skip_all:
                 break
+
+    def remap_library(self):
+        paths = [it.data(ROLE) for it in self.clips.selectedItems()]
+        if not paths:
+            self.status.setText("Sélectionne un clip (ou double-clique-le) pour régler son time remap.")
+            return
+        self.open_remap(paths)
 
     def remap_selected(self):
         paths = [it.data(ROLE) for it in self.order.selectedItems()]
