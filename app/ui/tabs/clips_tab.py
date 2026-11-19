@@ -54,8 +54,12 @@ def _rounded(pix, w=CARD_W, h=CARD_H, r=10):
     p.setClipPath(path)
     p.fillRect(out.rect(), QColor("#11181f"))
     if pix is not None and not pix.isNull():
-        sc = pix.scaled(w, h, Qt.AspectRatioMode.KeepAspectRatioByExpanding,
-                        Qt.TransformationMode.SmoothTransformation)
+        if pix.hasAlphaChannel():                  # image détourée : on la montre en entier
+            sc = pix.scaled(w - 12, h - 10, Qt.AspectRatioMode.KeepAspectRatio,
+                            Qt.TransformationMode.SmoothTransformation)
+        else:
+            sc = pix.scaled(w, h, Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+                            Qt.TransformationMode.SmoothTransformation)
         p.drawPixmap((w - sc.width()) // 2, (h - sc.height()) // 2, sc)
     p.end()
     return out
@@ -160,6 +164,10 @@ class ClipsTab(QWidget):
         super().__init__(parent)
         self.project = project
         self.library = library
+        try:
+            proj.ensure_default_knives()                # liste de couteaux par défaut (1re fois)
+        except Exception:
+            pass
         self.folders = proj.load_clip_folders()     # {couteau: [clips]}
         self.mode = "Clips"
         self.knife = None                           # couteau ouvert (page de ses clips)

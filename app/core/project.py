@@ -272,6 +272,60 @@ def load_clip_folders():
     return {str(k): [str(v) for v in vs if isinstance(v, str)] for k, vs in d.items() if isinstance(vs, list)}
 
 
+# couteaux proposés dès l'installation : (nom, image dans app/assets/couteaux)
+DEFAULT_KNIVES = [
+    ("Primordium", "primordium.png"), ("Griffes Oni", "griffes_oni.png"),
+    ("Kuronami Naru-Kami", "kuronami_naru_kami.png"), ("Kuronami no Yaiba", "kuronami_no_yaiba.png"),
+    ("RGX 11z Pro", "rgx_11z_pro.png"), ("Xenohunter", "xenohunter.png"), ("EX.O Edge", "exo_edge.png"),
+    ("Lame d'Aemondir", "aemondir.png"), ("Cyrax Fanblade", "cyrax_fanblade.png"),
+    ("Lanceur de sorts d'Evori", "lanceur_evori.png"),
+]
+
+
+def _knife_asset(name):
+    """Image fournie avec l'app (marche avec le .exe et avec les mises à jour légères)."""
+    import sys
+    roots = [Path(__file__).resolve().parents[1]]
+    if hasattr(sys, "_MEIPASS"):
+        roots.append(Path(sys._MEIPASS) / "app")
+    for r in roots:
+        f = r / "assets" / "couteaux" / name
+        if f.is_file():
+            return f
+    return None
+
+
+def ensure_default_knives():
+    """Une seule fois : ajoute la liste des couteaux par défaut (avec leur image) à la bibliothèque.
+    Un couteau qui existe déjà (même nom) garde ses clips ; un couteau supprimé ensuite ne revient pas."""
+    marker = config_dir() / "couteaux_defaut_v1.ok"
+    if marker.exists():
+        return
+    import shutil
+    from . import timeremap
+    folders = load_clip_folders()
+    lower = {k.lower(): k for k in folders}
+    cfg = timeremap.load()
+    for name, img in DEFAULT_KNIVES:
+        key = lower.get(name.lower(), name)
+        folders.setdefault(key, [])
+        src = _knife_asset(img)
+        k = cfg["couteaux"].setdefault(key, {})
+        if src is not None and not (k.get("carte") and Path(k["carte"]).is_file()):
+            target = timeremap.knife_dir() / f"defaut_{img}"
+            try:
+                shutil.copyfile(src, target)
+                k["carte"] = str(target)
+            except OSError:
+                pass
+    save_clip_folders(folders)
+    timeremap.save(cfg)
+    try:
+        marker.write_text("ok", encoding="utf-8")
+    except OSError:
+        pass
+
+
 def save_clip_folders(folders):
     try:
         _folders_file().write_text(json.dumps(folders, ensure_ascii=False, indent=1), encoding="utf-8")
