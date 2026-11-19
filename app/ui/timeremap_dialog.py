@@ -176,6 +176,12 @@ class TimeRemapDialog(QDialog):
         self.skip_all = False
         self.thread = None
         old = tr.clip_remaps().get(path) or project.remaps.get(path) or {}
+        # durées propres à ce clip : elles ne changent pas les réglages des autres clips
+        self._glob = (self.cfg["duree_ralenti"], self.cfg["frames_retour"])
+        if old.get("ralenti"):
+            self.cfg["duree_ralenti"] = float(old["ralenti"])
+        if old.get("retour"):
+            self.cfg["frames_retour"] = int(old["retour"])
 
         title = QLabel(f"Time remap {'kunai ' if self.kunai else ''}— {Path(path).name}")
         title.setObjectName("h1")
@@ -337,7 +343,7 @@ class TimeRemapDialog(QDialog):
         name = self.knife.currentText().strip()
         if f and name:
             self.cfg["couteaux"].setdefault(name, {})["image"] = f
-            tr.save(self.cfg)
+            tr.save(self._global_cfg())
             self._knife_changed()
 
     # --------------------------------------------------------- détection
@@ -443,8 +449,9 @@ class TimeRemapDialog(QDialog):
         self._save_settings()
         if self.kunai:
             self.cfg["duree_kunai"] = round(end - start, 4)
-            tr.save_kunai(self.cfg)
-            data = {"type": "kunai", "debut": round(start, 4), "fin": round(end, 4)}
+            tr.save_kunai(self._global_cfg())
+            data = {"type": "kunai", "debut": round(start, 4), "fin": round(end, 4),
+                    "ralenti": self.slow.value(), "retour": self.back.value()}
             self.project.remaps[self.path] = data
             tr.save_clip_remap(self.path, data)
             self.accept()
@@ -456,8 +463,9 @@ class TimeRemapDialog(QDialog):
             img = tr.save_knife_image(name, self.path, end)
             if img:
                 k["image"] = img
-        tr.save(self.cfg)
-        data = {"couteau": name, "debut": round(start, 4), "fin": round(end, 4)}
+        tr.save(self._global_cfg())
+        data = {"couteau": name, "debut": round(start, 4), "fin": round(end, 4),
+                "ralenti": self.slow.value(), "retour": self.back.value()}
         self.project.remaps[self.path] = data
         tr.save_clip_remap(self.path, data)
         self.accept()
@@ -466,12 +474,18 @@ class TimeRemapDialog(QDialog):
         self.skip_all = True
         self.reject()
 
+    def _global_cfg(self):
+        """Réglages à garder pour tous les clips : sans les durées propres à ce clip."""
+        g = dict(self.cfg)
+        g["duree_ralenti"], g["frames_retour"] = self._glob
+        return g
+
     def done(self, r):
         self._save_settings()
         if self.kunai:
-            tr.save_kunai(self.cfg)
+            tr.save_kunai(self._global_cfg())
         else:
-            tr.save(self.cfg)
+            tr.save(self._global_cfg())
         if self.thread is not None and self.thread.isRunning():
             self.thread.wait(10000)
         if self.preview_thread is not None and self.preview_thread.isRunning():

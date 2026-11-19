@@ -64,12 +64,16 @@ def load():
 def cfg_for(data, cfg=None):
     """Réglages à utiliser pour un time remap : ceux des kunais si c'est un kunai."""
     base = cfg or load()
+    merged = dict(base)
     if isinstance(data, dict) and data.get("type") == "kunai":
-        merged = dict(base)
         k = base.get("kunai_reglages") or {}
         merged.update({key: k[key] for key in KUNAI_KEYS if key in k})
-        return merged
-    return base
+    if isinstance(data, dict):                     # réglages propres à ce clip (s'il en a)
+        if data.get("ralenti"):
+            merged["duree_ralenti"] = float(data["ralenti"])
+        if data.get("retour"):
+            merged["frames_retour"] = int(data["retour"])
+    return merged
 
 
 def save_kunai(merged):

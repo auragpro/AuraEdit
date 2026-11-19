@@ -1,3 +1,9 @@
+## Nouveautés de la version 0.7.5
+
+- **Time remap : la durée du ralenti (1 → 2) et la durée du retour (2 → 3) sont maintenant propres à chaque clip.**
+  - Les changer sur un clip ne modifie plus les autres clips.
+  - Chaque clip garde ses propres valeurs quand tu le rouvres et quand tu génères l'edit.
+
 ## Nouveautés de la version 0.7.4
 
 - **Détection du time remap des clips refaite** :

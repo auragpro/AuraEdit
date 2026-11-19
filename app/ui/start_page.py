@@ -13,9 +13,8 @@ from version import __version__
 from .style import RED, asset
 
 WHATS_NEW = [
-    "Time remap : keyframe 1 = 1re frame où le couteau sort",
-    "Keyframe 2 = flick away + 20 frames",
-    "Détection qui marche même sans bannière de kill"]
+    "Durée du ralenti et du retour réglables clip par clip",
+    "Changer un clip ne touche plus les autres"]
 
 
 def ago(ts):
