@@ -15,7 +15,7 @@ from ..widgets import file_filter, page_header
 ROLE = Qt.ItemDataRole.UserRole
 FOUND = "Trouvés sur le PC"
 ROLE_DIR = Qt.ItemDataRole.UserRole.value + 1   # nom du dossier sur les lignes « dossier »
-MODES = ("Clips", "Kunai", "Dash")
+MODES = ("Clips", "Kunai", "Dash", "Dash back", "Dismiss")
 
 
 def _name(path):
@@ -362,7 +362,7 @@ class ClipsTab(QWidget):
     def showEvent(self, event):
         """La bibliothèque a pu changer (autre onglet) : on recharge."""
         super().showEvent(event)
-        self.folders = proj.load_clip_folders()
+        self.folders = proj.sync_special_folders(self.project)
         if not self.library:                       # time remap changé dans la bibliothèque : on le reprend
             from app.core import timeremap
             saved = timeremap.clip_remaps()
@@ -385,7 +385,8 @@ class ClipsTab(QWidget):
 
     def _label_of(self, path):
         """Petit préfixe dans l'ordre de l'edit : [couteau], Kunai, Dash."""
-        for name, st in (("Kunai", self.project.kunai), ("Dash", self.project.dash)):
+        for name, attr in proj.SPECIAL_ATTR.items():
+            st = getattr(self.project, attr)
             if path in st.gauche:
                 return f"{name} gauche"
             if path in st.droite:
@@ -417,7 +418,8 @@ class ClipsTab(QWidget):
         k = timeremap.load()["couteaux"].get(name) or {}
         img = k.get("carte") or k.get("image")
         pix = QPixmap(img) if img and Path(img).is_file() else None
-        return _rounded(pix) if pix is not None and not pix.isNull() else _symbol("🔪")
+        return (_rounded(pix) if pix is not None and not pix.isNull()
+                else _symbol(proj.SPECIAL_FOLDERS.get(name, "🔪")))
 
     def refresh_left(self):
         """Redessine la partie gauche selon le mode choisi."""
@@ -435,7 +437,7 @@ class ClipsTab(QWidget):
                                      "Aucun clip : ajoute-les dans la Bibliothèque « Mes clips »."))
         else:
             self.tree.clear()
-            st = self.project.kunai if self.mode == "Kunai" else self.project.dash
+            st = getattr(self.project, proj.SPECIAL_ATTR[self.mode])
             for side, icon in (("gauche", "✋"), ("droite", "🤚")):
                 lst = getattr(st, side)
                 top = QTreeWidgetItem(self.tree, [f"{icon} {self.mode} main {side}  ({len(lst)})"])
@@ -728,7 +730,7 @@ class ClipsTab(QWidget):
         """Ouvre la page Time remap pour chaque clip (couteau, keyframes, courbes)."""
         from ..timeremap_dialog import TimeRemapDialog
         for p in paths:
-            if p in self.project.dash.videos:
+            if p in self.project.dash.videos or p in self.project.dashback.videos or p in self.project.dismiss.videos:
                 continue
             if p in self.project.kunai.videos:
                 dlg = TimeRemapDialog(self.project, p, None, (), self, mode="kunai")

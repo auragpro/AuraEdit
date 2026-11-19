@@ -13,9 +13,9 @@ from version import __version__
 from .style import RED, asset
 
 WHATS_NEW = [
-    "Nouveau : « Reproduire » un edit fini avec tes clips",
-    "Toutes les transitions détectées, ajout manuel à la frame près",
-    "Courbes de time remap enregistrables (comme Flow)"]
+    "Nouvelles parties : Dash back et Dismiss",
+    "Dash, Kunai, Dash back et Dismiss dans « Mes clips »",
+    "Ces catégories sont proposées dans « Reproduire un edit »"]
 
 
 def ago(ts):

@@ -95,6 +95,8 @@ class Project:
     kunai: KunaiSettings = field(default_factory=KunaiSettings)
     sons: dict = field(default_factory=default_sons)
     dash: DashSettings = field(default_factory=DashSettings)
+    dashback: DashSettings = field(default_factory=DashSettings)
+    dismiss: DashSettings = field(default_factory=DashSettings)
     render: dict = field(default_factory=dict)          # dernier rendu : fichier + coupes (pour les shakes)
     remaps: dict = field(default_factory=dict)
     shakes: dict = field(default_factory=dict)          # {"actif", "in", "out", "duree", "seed"}
@@ -146,6 +148,8 @@ class Project:
             kunai=_hands(KunaiSettings, kunai, position=pos if pos in KUNAI_POSITIONS else "les deux"),
             sons={**default_sons(), **(data.get("sons") if isinstance(data.get("sons"), dict) else {})},
             dash=_hands(DashSettings, data.get("dash")),
+            dashback=_hands(DashSettings, data.get("dashback")),
+            dismiss=_hands(DashSettings, data.get("dismiss")),
             render=data.get("render") if isinstance(data.get("render"), dict) else {},
             remaps=data.get("remaps") if isinstance(data.get("remaps"), dict) else {},
             shakes=data.get("shakes") if isinstance(data.get("shakes"), dict) else {},
@@ -161,6 +165,7 @@ class Project:
     def missing_files(self):
         """Fichiers du projet qui n'existent plus sur le PC (déplacés, supprimés...)."""
         files = [self.intro, self.outro, self.music, *self.clips, *self.kunai.videos, *self.dash.videos,
+                 *self.dashback.videos, *self.dismiss.videos,
                  self.sons.get("paroles")]
         return [f for f in files if f and not Path(f).is_file()]
 
@@ -326,6 +331,32 @@ def ensure_default_knives():
         marker.write_text("ok", encoding="utf-8")
     except OSError:
         pass
+
+
+# catégories spéciales de « Mes clips » (en plus des couteaux) : nom -> symbole
+SPECIAL_FOLDERS = {"Dash": "💨", "Kunai": "🗡", "Dash back": "↩", "Dismiss": "🌀"}
+# partie du projet (main gauche / droite) qui va avec chaque catégorie
+SPECIAL_ATTR = {"Dash": "dash", "Kunai": "kunai", "Dash back": "dashback", "Dismiss": "dismiss"}
+
+
+def sync_special_folders(project=None):
+    """Crée les catégories Dash / Kunai / Dash back / Dismiss dans « Mes clips » et y range
+    les vidéos de ces parties du projet (sans doublon)."""
+    folders = load_clip_folders()
+    changed = False
+    for name in SPECIAL_FOLDERS:
+        if name not in folders:
+            folders[name] = []
+            changed = True
+        if project is not None:
+            st = getattr(project, SPECIAL_ATTR[name], None)
+            for v in (st.videos if st else []):
+                if v not in folders[name]:
+                    folders[name].append(v)
+                    changed = True
+    if changed:
+        save_clip_folders(folders)
+    return folders
 
 
 def save_clip_folders(folders):

@@ -9,14 +9,17 @@ from ..style import PANEL, PANEL_2, RED
 from ..widgets import page_header
 from .clips_tab import ClipsTab
 from .dash_tab import DashTab
+from .dashback_tab import DashBackTab
+from .dismiss_tab import DismissTab
 from .intro_tab import IntroTab
 from .kunai_tab import KunaiTab
 from .music_tab import MusicTab
 from .shake_tab import ShakeTab
 
 PARTS = [("Intro", IntroTab), ("Musique", MusicTab), ("Clips", ClipsTab),
-         ("Kunai", KunaiTab), ("Dash", DashTab), ("Shake", ShakeTab)]
-ICONS = {"Intro": "🎬", "Musique": "🎵", "Clips": "🔪", "Kunai": "🗡", "Dash": "💨", "Shake": "💥", "Reproduire": "🎞", "Générer": "▶"}
+         ("Kunai", KunaiTab), ("Dash", DashTab), ("Dash back", DashBackTab), ("Dismiss", DismissTab),
+         ("Shake", ShakeTab)]
+ICONS = {"Intro": "🎬", "Musique": "🎵", "Clips": "🔪", "Kunai": "🗡", "Dash": "💨", "Dash back": "↩", "Dismiss": "🌀", "Shake": "💥", "Reproduire": "🎞", "Générer": "▶"}
 
 TILE_CSS = f"""
 QPushButton {{ background: {PANEL}; border: 2px solid {PANEL_2}; border-radius: 14px;
@@ -79,7 +82,8 @@ class MontageTab(QWidget):
             wl.addWidget(page, 1)
             self.stack.addWidget(wrap)
         self.parts["Kunai"].changed.connect(self.parts["Clips"].refresh_left)
-        self.parts["Dash"].changed.connect(self.parts["Clips"].refresh_left)
+        for n in ("Dash", "Dash back", "Dismiss"):
+            self.parts[n].changed.connect(self.parts["Clips"].refresh_left)
 
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
@@ -116,6 +120,8 @@ class MontageTab(QWidget):
             "Clips": f"✓ {len(p.clips)} clip(s)" if p.clips else "✗ aucun clip",
             "Kunai": hands(p.kunai),
             "Dash": hands(p.dash),
+            "Dash back": hands(p.dashback),
+            "Dismiss": hands(p.dismiss),
             "Shake": self.parts["Shake"].summary() if "Shake" in self.parts else "",
             "Reproduire": "copier un edit fini",
             "Générer": "rendu MP4",

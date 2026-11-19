@@ -1,3 +1,12 @@
+## Nouveautés de la version 0.7.7
+
+- **Nouvelles parties dans Montage : « ↩ Dash back » et « 🌀 Dismiss »**.
+  - Elles marchent comme Dash : une main gauche et une main droite.
+  - On les retrouve aussi dans **Clips** pour les mettre dans l'ordre de l'edit.
+- **« Mes clips » a maintenant 4 catégories en plus des couteaux : Dash, Kunai, Dash back et Dismiss.**
+  - Tes vidéos de ces parties y sont rangées automatiquement.
+  - Elles sont proposées dans **Reproduire un edit**.
+
 ## Nouveautés de la version 0.7.6
 
 - **Nouveau carré « 🎞 Reproduire » dans Montage** : refais un edit fini avec tes propres clips.

@@ -248,7 +248,7 @@ class ReproduceDialog(QDialog):
         return w
 
     def _pools(self):
-        folders = proj.load_clip_folders()
+        folders = proj.sync_special_folders(self.project)
         knives = tr.load()["couteaux"]
         pools = []
         for name, clips in sorted(folders.items(), key=lambda kv: kv[0].lower()):
@@ -256,12 +256,6 @@ class ReproduceDialog(QDialog):
             if clips:
                 k = knives.get(name) or {}
                 pools.append((name, clips, k.get("carte") or k.get("image")))
-        dash = [c for c in self.project.dash.videos if Path(c).is_file()]
-        kunai = [c for c in self.project.kunai.videos if Path(c).is_file()]
-        if dash:
-            pools.append(("💨 Dash", dash, None))
-        if kunai:
-            pools.append(("🗡 Kunai", kunai, None))
         return pools
 
     def start_choose(self):
@@ -272,7 +266,9 @@ class ReproduceDialog(QDialog):
         self.grid.clear()
         for name, clips, img in self._pools():
             pix = QPixmap(img) if img and Path(img).is_file() else QPixmap()
-            it = QListWidgetItem(QIcon(pix) if not pix.isNull() else QIcon(), f"{name}\n{len(clips)} clip(s)")
+            sym = proj.SPECIAL_FOLDERS.get(name, "")
+            it = QListWidgetItem(QIcon(pix) if not pix.isNull() else QIcon(),
+                                 f"{sym} {name}\n{len(clips)} clip(s)".strip())
             it.setData(ROLE, (name, clips))
             self.grid.addItem(it)
         self.stack.setCurrentIndex(1)
