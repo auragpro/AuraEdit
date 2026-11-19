@@ -299,7 +299,19 @@ def source_fps(path):
     return 60.0
 
 
-def render(path, start, end, cfg, output, is_cancelled=None):
+def render(path, start, end, cfg, output, is_cancelled=None, progress=None):
+    """Comme _render ; si le Pixel Motion échoue, on refait automatiquement en Frame Mix."""
+    if blend_mode(cfg) == "motion":
+        try:
+            return _render(path, start, end, cfg, output, is_cancelled, progress)
+        except InterruptedError:
+            raise
+        except Exception:
+            cfg = dict(cfg, blending_mode="mix")
+    return _render(path, start, end, cfg, output, is_cancelled, progress)
+
+
+def _render(path, start, end, cfg, output, is_cancelled=None, progress=None):
     """Fabrique la partie time-remappée du clip (1920x1080, 60 i/s, sans son).
 
     Frame Mix : chaque image de sortie = mélange des 2 images source voisines (comme After Effects).
@@ -311,7 +323,8 @@ def render(path, start, end, cfg, output, is_cancelled=None):
     times = [source_time(min(k / FPS, total), start, end, cfg) for k in range(n_out)]
 
     sfps = source_fps(path)
-    rate = sfps * (4 if mode == "motion" else 1)           # images par seconde après interpolation
+    factor = (2 if sfps >= 50 else 4) if mode == "motion" else 1
+    rate = sfps * factor                                     # images par seconde après interpolation
     lo = max(0.0, min(times) - 2 / sfps)
     hi = max(times) + 2 / sfps
     pos = [(s - lo) * rate for s in times]
@@ -326,14 +339,16 @@ def render(path, start, end, cfg, output, is_cancelled=None):
 
     vf = f"fps={sfps:g}"
     if mode == "motion":
-        vf += f",minterpolate=fps={rate:g}:mi_mode=mci:mc_mode=aobmc:me_mode=bidir:vsbmc=1"
+        vf += f",minterpolate=fps={rate:g}:mi_mode=mci:mc_mode=obmc:me_mode=bidir"
     vf += f",scale={W}:{H}:force_original_aspect_ratio=decrease,pad={W}:{H}:(ow-iw)/2:(oh-ih)/2,setsar=1"
     size = W * H * 3
     frames = {}
+    errf = tempfile.TemporaryFile()
     dec = subprocess.Popen([audio.ffmpeg_exe(), "-hide_banner", "-loglevel", "error", "-ss", f"{lo:.4f}",
                             "-i", str(path), "-t", f"{hi - lo:.4f}", "-an", "-vf", vf,
                             "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
-                           stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, creationflags=audio._NO_WINDOW)
+                           stdout=subprocess.PIPE, stderr=errf, creationflags=audio._NO_WINDOW)
+    label = "Pixel Motion" if mode == "motion" else "time remap"
     idx, lastframe = 0, None
     try:
         while idx <= last_needed:                  # on ne garde que les images utiles (peu de mémoire)
@@ -346,11 +361,17 @@ def render(path, start, end, cfg, output, is_cancelled=None):
                 frames[idx] = np.frombuffer(buf, dtype=np.uint8)
             lastframe = idx
             idx += 1
+            if progress and idx % 4 == 0:
+                progress(0.85 * idx / (last_needed + 1), f"{label} : calcul des images {idx}/{last_needed + 1}")
     finally:
         dec.kill()
         dec.wait()
     if not frames:
-        raise ValueError(f"Impossible de lire {Path(path).name}")
+        errf.seek(0)
+        msg = errf.read()[-600:].decode("utf-8", "replace")
+        errf.close()
+        raise ValueError(f"Impossible de lire {Path(path).name}\n{msg}")
+    errf.close()
     avail = sorted(frames)
 
     def frame(i):
@@ -365,9 +386,11 @@ def render(path, start, end, cfg, output, is_cancelled=None):
                                stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=err,
                                creationflags=audio._NO_WINDOW)
         try:
-            for x in pos:
+            for k, x in enumerate(pos):
                 if is_cancelled and is_cancelled():
                     raise InterruptedError()
+                if progress and k % 8 == 0:
+                    progress(0.85 + 0.15 * k / len(pos), f"{label} : assemblage {k}/{len(pos)}")
                 x = min(max(x, 0.0), float(lastframe if lastframe is not None else 0))
                 if mode == "off":
                     img = frame(int(round(x)))

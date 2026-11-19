@@ -13,9 +13,9 @@ from version import __version__
 from .style import RED, asset
 
 WHATS_NEW = [
+    "Pixel Motion réparé, plus rapide, + bouton Aperçu dans le time remap",
     "Glisse tes clips depuis l'Explorateur directement dans un couteau",
-    "Frame blending corrigé comme After Effects, + mode Pixel Motion",
-    "Couteaux présentés en cartes avec leur image, et filtre",
+    "Frame blending corrigé comme After Effects",
 ]
 
 

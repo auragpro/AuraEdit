@@ -1,6 +1,6 @@
-## Nouveautés de la version 0.5.5
+## Nouveautés de la version 0.5.6
 
-- **Glisser-déposer de tes clips** : ouvre un couteau et glisse tes vidéos depuis l'Explorateur Windows directement dans la liste. Elles sont ajoutées au couteau (et sauvegardées dans AuraEdit).
-- Tu peux aussi lâcher des vidéos **sur une carte de couteau** dans la grille, ou glisser un **dossier entier** : toutes ses vidéos sont ajoutées.
-- La liste vide affiche « Glisse tes clips ici », et elle s'entoure de rouge quand tu passes au-dessus avec des fichiers.
-- Les boutons du couteau ne sont plus coupés.
+- **Pixel Motion réparé et presque 3 fois plus rapide.** Avant, il calculait beaucoup trop d'images intermédiaires : le rendu semblait bloqué. Maintenant il en calcule juste assez (×2 pour un clip en 60 i/s, ×4 pour un clip en 30 i/s).
+- **On voit l'avancement** pendant le rendu, image par image (« Pixel Motion : calcul des images 40/120 »), au lieu d'une barre figée.
+- **Nouveau bouton « ▶ Aperçu »** dans la page Time remap : il rend ce clip avec ton time remap et le frame blending choisi, puis l'ouvre dans ton lecteur vidéo. Tu vois tout de suite si Pixel Motion te plaît.
+- Si le Pixel Motion n'arrive pas à traiter un clip, le logiciel passe automatiquement en Frame Mix au lieu de bloquer le rendu.

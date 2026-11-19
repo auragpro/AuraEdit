@@ -27,6 +27,33 @@ class DetectThread(QThread):
             self.failed.emit(str(e) or e.__class__.__name__)
 
 
+class PreviewThread(QThread):
+    progress = pyqtSignal(float, str)
+    done = pyqtSignal(str)
+    failed = pyqtSignal(str)
+
+    def __init__(self, path, start, end, cfg, parent=None):
+        super().__init__(parent)
+        self.args = (path, start, end, cfg)
+        self._cancel = False
+
+    def cancel(self):
+        self._cancel = True
+
+    def run(self):
+        import tempfile
+        out = str(Path(tempfile.gettempdir()) / "auraedit_apercu_time_remap.mp4")
+        try:
+            tr.render(*self.args, out, lambda: self._cancel, self.progress.emit)
+        except InterruptedError:
+            self.failed.emit("Aperçu annulé.")
+            return
+        except Exception as e:
+            self.failed.emit(str(e) or e.__class__.__name__)
+            return
+        self.done.emit(out)
+
+
 class CurvePreview(QWidget):
     """Graphique des valeurs du time remap : monte (courbe 1) puis redescend (courbe 2)."""
 
@@ -233,6 +260,10 @@ class TimeRemapDialog(QDialog):
         self.b_ok.setObjectName("primary")
         self.b_ok.setEnabled(False)
         self.b_ok.clicked.connect(self.validate)
+        self.b_preview = QPushButton("▶ Aperçu")
+        self.b_preview.setToolTip("Rend ce clip avec le time remap et le frame blending choisis, puis l'ouvre.")
+        self.b_preview.clicked.connect(self.preview_render)
+        self.preview_thread = None
         b_redo = QPushButton("Refaire la détection")
         b_redo.clicked.connect(self.run_detect)
         b_none = QPushButton("Pas de time remap")
@@ -241,6 +272,7 @@ class TimeRemapDialog(QDialog):
         b_later.clicked.connect(self._later)
         brow = QHBoxLayout()
         brow.addWidget(b_redo)
+        brow.addWidget(self.b_preview)
         brow.addStretch(1)
         brow.addWidget(b_later)
         brow.addWidget(b_none)
@@ -351,6 +383,34 @@ class TimeRemapDialog(QDialog):
         self.cfg["blending_mode"] = self.blend.currentData()
         self.cfg["blending"] = self.cfg["blending_mode"] != "off"
 
+    def preview_render(self):
+        if self.preview_thread is not None and self.preview_thread.isRunning():
+            self.preview_thread.cancel()
+            return
+        start, end = self.k1.seconds(), self.k2.seconds()
+        if end <= start:
+            self.status.setText("La keyframe 2 doit être après la keyframe 1.")
+            return
+        self._save_settings()
+        self.preview_thread = PreviewThread(self.path, start, end, dict(self.cfg), self)
+        self.preview_thread.progress.connect(lambda f, t: self.status.setText(f"Aperçu {int(f * 100)} % — {t}"))
+        self.preview_thread.done.connect(self._preview_done)
+        self.preview_thread.failed.connect(self._preview_failed)
+        self.b_preview.setText("■ Annuler l'aperçu")
+        self.status.setText("Aperçu en cours...")
+        self.preview_thread.start()
+
+    def _preview_done(self, out):
+        from PyQt6.QtCore import QUrl
+        from PyQt6.QtGui import QDesktopServices
+        self.b_preview.setText("▶ Aperçu")
+        self.status.setText("Aperçu prêt : il s'ouvre dans ton lecteur vidéo.")
+        QDesktopServices.openUrl(QUrl.fromLocalFile(out))
+
+    def _preview_failed(self, msg):
+        self.b_preview.setText("▶ Aperçu")
+        self.status.setText(f"Aperçu impossible : {msg[-300:]}")
+
     def validate(self):
         start, end = self.k1.seconds(), self.k2.seconds()
         if end <= start:
@@ -379,4 +439,7 @@ class TimeRemapDialog(QDialog):
         tr.save(self.cfg)
         if self.thread is not None and self.thread.isRunning():
             self.thread.wait(10000)
+        if self.preview_thread is not None and self.preview_thread.isRunning():
+            self.preview_thread.cancel()
+            self.preview_thread.wait(10000)
         super().done(r)
