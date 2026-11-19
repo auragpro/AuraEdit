@@ -68,6 +68,19 @@ def _request(url):
     })
 
 
+def clean_notes(text):
+    """Garde seulement les nouveautés : retire les liens GitHub et le « Full Changelog »."""
+    out = []
+    for line in text.replace("\r", "").split("\n"):
+        low = line.lower()
+        if "full changelog" in low or "what's changed" in low or "new contributors" in low:
+            continue
+        if "github.com" in low or "http://" in low or "https://" in low:
+            continue
+        out.append(line)
+    return "\n".join(out).strip()
+
+
 def check_for_update(current=__version__):
     """Renvoie un UpdateInfo si une version plus récente existe, sinon None.
 
@@ -90,7 +103,7 @@ def check_for_update(current=__version__):
     digest = asset.get("digest") or ""
     return UpdateInfo(
         version=".".join(map(str, parse_version(tag))),
-        notes=(data.get("body") or "").strip(),
+        notes=clean_notes(data.get("body") or ""),
         download_url=asset["browser_download_url"],
         size=int(asset.get("size") or 0),
         sha256=digest.split(":", 1)[1].lower() if digest.startswith("sha256:") else None,

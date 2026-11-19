@@ -142,5 +142,14 @@ class UpdaterTests(unittest.TestCase):
         self.assertEqual(exe.read_bytes(), b"ANCIEN")    # le logiciel reste utilisable
 
 
+class NotesTests(unittest.TestCase):
+    def test_notes_without_github_links(self):
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+        from app.core.updater import clean_notes
+        body = ("## Nouveautés\r\n- Sons mieux reconnus\r\n\r\n"
+                "**Full Changelog**: https://github.com/auragpro/AuraEdit/compare/v0.1.0...v0.2.0")
+        self.assertEqual(clean_notes(body), "## Nouveautés\n- Sons mieux reconnus")
+
+
 if __name__ == "__main__":
     unittest.main()

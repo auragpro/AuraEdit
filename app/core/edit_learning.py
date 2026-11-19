@@ -22,6 +22,7 @@ SR = ma.SR
 DT = ma.DT
 MATCH_THRESHOLD = 0.66        # ressemblance mini (0..1) pour dire « ce son est là »
 MAX_TEMPLATE_S = 1.5
+MIN_LEVEL_DB = -10.0        # un sound kill retrouvé doit peser au moins ça dans l'edit
 ONSET_MATCH = 0.42          # ressemblance mini quand un départ net est entendu
 
 
@@ -114,6 +115,55 @@ def find_shift(edit, music):
         return coarse
     c = _xcorr(win, seg)[len(seg) - 1:len(seg) - 1 + len(win) - len(seg) + 1]
     return int(a0 + np.argmax(c) - s0)
+
+
+def waveform_residual(edit, music_aligned, mask_frames, block_s=0.5):
+    """Si la musique de l'edit est EXACTEMENT celle du fichier (même master, juste le volume
+    qui change), on la retire échantillon par échantillon : il ne reste que les sons ajoutés,
+    parfaitement propres. Renvoie None si ce n'est pas le cas (musique retouchée, ré-échantillonnée...).
+    """
+    n = len(edit)
+    b = int(block_s * SR)
+    out = np.zeros(n, dtype=np.float32)
+    ratios = []
+    for i in range(0, n, b):
+        e, m = edit[i:i + b].astype(np.float64), music_aligned[i:i + b].astype(np.float64)
+        mm = float(m @ m)
+        if mm < 1e-6:
+            out[i:i + b] = e
+            continue
+        g = min(max(float(e @ m) / mm, 0.0), 3.0)
+        r = e - g * m
+        out[i:i + b] = r
+        f = min(len(mask_frames) - 1, int((i + b // 2) / ma.HOP))
+        if mask_frames[f]:
+            ratios.append(float(r @ r) / (float(e @ e) + 1e-12))
+    waveform_residual.last_ratio = float(np.percentile(ratios, 20)) if ratios else 1.0
+    if len(ratios) < 4 or waveform_residual.last_ratio > 0.005:
+        return None
+    return out
+
+
+def attacks_match(e_spec, a_spec):
+    """Vrai si la musique calée colle vraiment à l'edit (comparaison des attaques)."""
+    fe, fm = ma._flux(e_spec), ma._flux(a_spec)
+    active = np.where(a_spec.sum(1) > 0)[0]
+    if active.size < 50:
+        return False
+    i0, i1 = active[0], active[-1] + 1
+
+    def corr(lag):
+        x = fe[i0 + lag:i1] if lag >= 0 else fe[i0:i1 + lag]
+        y = fm[i0:i1 - lag] if lag >= 0 else fm[i0 - lag:i1]
+        if len(x) < 50:
+            return 0.0
+        x = (x - x.mean()) / (x.std() + 1e-9)
+        y = (y - y.mean()) / (y.std() + 1e-9)
+        return float(np.mean(x * y))
+
+    best = corr(0)
+    others = max(corr(d) for d in (-40, -25, -13, -7, 7, 13, 25, 40))
+    return best >= 0.25 and best - others >= 0.12
 
 
 def _aligned(music, shift, n):
@@ -215,7 +265,7 @@ def residual_onsets(res_log):
 
 
 def find_sounds(res_log, templates, threshold=MATCH_THRESHOLD, onset_threshold=ONSET_MATCH,
-                progress=None):
+                progress=None, edit_lin=None, min_level_db=MIN_LEVEL_DB):
     """Positions (trame de départ, score, empreinte) de tes sons dans le reste.
 
     Deux façons de trouver un son :
@@ -282,12 +332,17 @@ def find_sounds(res_log, templates, threshold=MATCH_THRESHOLD, onset_threshold=O
         if any(abs(k - k2) * DT < 0.09 and (tp2.sound.category in sa.ALIGN_PEAK) == peak_like
                for k2, _, tp2 in kept):
             continue
-        kept.append((k, score, tp))
-        # retire ce son du reste (volume estimé là où le son est fort)
         seg = lin[k:k + L]
         mask = tp.lin > 0.1 * tp.lin.max()
+        alpha = float(np.median(seg[mask] / tp.lin[mask])) if mask.any() else 0.0
+        if edit_lin is not None:
+            # le son doit vraiment s'entendre dans l'edit (pas un reste de compression)
+            here = float(edit_lin[k:k + L][mask].sum()) + 1e-12
+            if alpha * float(tp.lin[mask].sum()) < 10 ** (min_level_db / 10) * here:
+                continue
+        kept.append((k, score, tp))
+        # retire ce son du reste (volume estimé là où le son est fort)
         if mask.any():
-            alpha = float(np.median(seg[mask] / tp.lin[mask]))
             lin[k:k + L] = np.maximum(seg - alpha * tp.lin, 0)
     return kept
 
@@ -314,19 +369,14 @@ def listen(edit_path, music_path, library, progress=None):
     overlap = np.count_nonzero(m_al) / max(1, min(len(music), len(edit)))
     if overlap < 0.2:
         raise ValueError("La musique n'a pas été retrouvée dans l'edit. Est-ce bien la musique d'origine ?")
-    # contrôle : au bon calage, l'edit ressemble NETTEMENT plus à la musique qu'à côté
+    # contrôle : au bon calage, les attaques (coups de batterie...) de l'edit et de la musique
+    # tombent ensemble ; un peu à côté, plus du tout. Une autre musique ne colle nulle part.
     e_spec, _ = ma.band_spectrogram(edit)
     a_spec, _ = ma.band_spectrogram(m_al)
-    m_spec, _ = ma.band_spectrogram(music)
     n = min(len(e_spec), len(a_spec))
-    Ec = e_spec - e_spec.mean(1, keepdims=True)
-    Mc = m_spec - m_spec.mean(1, keepdims=True)
-    lag = int(round(shift / ma.HOP))
-    best = _frame_similarity(Ec, Mc, lag)
-    others = [_frame_similarity(Ec, Mc, lag + d) for d in (-40, -25, -13, -7, 7, 13, 25, 40)]
-    if best - float(np.median(others)) < 0.06:
+    if not attacks_match(e_spec[:n], a_spec[:n]):
         raise ValueError("La musique n'a pas été retrouvée dans l'edit. Est-ce bien la musique d'origine "
-                         "(la même version, sans les sons) ?")
+                         "(la même chanson, sans les sons) ?")
 
     step("Retrait de la musique...", 0.25)
     # la musique « joue » là où le spectre de l'edit ressemble à celui de la musique (fenêtre ~1 s)
@@ -346,8 +396,23 @@ def listen(edit_path, music_path, library, progress=None):
     mask[present[0]:present[-1] + 1] = True
     edit_from, edit_to = present[0] * DT, (present[-1] + 1) * DT
     res, g = residual(edit, m_al, mask)
-    res[~mask[:len(res)]] = 0.0                      # rien à chercher dans l'intro / l'outro
     med = float(np.median(g[mask[:len(g)]])) if mask[:len(g)].any() else 0.0
+    clean = waveform_residual(edit, m_al, mask)
+    if clean is not None:                            # même musique exacte : retrait parfait
+        res_lin, _ = ma.band_spectrogram(clean, linear=True)
+        res = np.log1p(100 * res_lin[:len(res)])
+        if len(res) < len(mask):
+            res = np.pad(res, ((0, len(mask) - len(res)), (0, 0)))
+        # un sound kill s'entend par-dessus la musique ; ce qui est 12 dB plus bas que l'edit
+        # à cet endroit n'est que du bruit de compression (mp3 / mp4)
+        e_lin, _ = ma.band_spectrogram(edit, linear=True)
+        m = min(len(e_lin), len(res_lin), len(res))
+        k = max(1, int(0.25 / DT))
+        local = np.convolve(e_lin[:m].sum(1), np.ones(k) / k, "same")
+        quiet = res_lin[:m].sum(1) < 10 ** (-12 / 10) * local
+        quiet = np.convolve(quiet.astype(float), np.ones(3) / 3, "same") > 0.99
+        res[:m][quiet] = 0.0
+    res[~mask[:len(res)]] = 0.0                      # rien à chercher dans l'intro / l'outro
     step("Chargement de tes sons...", 0.35)
     templates = []
     for i, s in enumerate(library):
@@ -359,7 +424,8 @@ def listen(edit_path, music_path, library, progress=None):
             step(f"Chargement de tes sons... ({i + 1}/{len(library)})", 0.35 + 0.2 * (i + 1) / len(library))
 
     step("Recherche de tes sound kills...", 0.55)
-    kept = find_sounds(res, templates, progress=lambda a, b: step(
+    e_lin, _ = ma.band_spectrogram(edit, linear=True)
+    kept = find_sounds(res, templates, edit_lin=e_lin[:len(res)] if clean is not None else None, progress=lambda a, b: step(
         f"Recherche de tes sound kills... ({a}/{b})", 0.55 + 0.35 * a / b))
 
     step("Analyse de la musique...", 0.92)

@@ -252,8 +252,10 @@ class SoundAI:
         return {c: 0.3 + prior.get(c, 0) + learned.get(c, 0) for c in available}
 
     def sound_score(self, s):
+        """Poids d'un son : un son que tu utilises souvent (ou gardes) passe devant ceux
+        que tu n'as jamais pris ; un son supprimé passe derrière."""
         a, b = self.sound.get(s.key, (0, 0))
-        return (a + 1) / (a + b + 2)
+        return (a + 0.5) / (b + 1.0)
 
     # ---------------------------------------------------- génération
     def generate(self, analysis, library, density=0.5, creativity=0.3, seed=None,
