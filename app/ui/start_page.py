@@ -13,8 +13,8 @@ from version import __version__
 from .style import RED, asset
 
 WHATS_NEW = [
-    "Apprendre d'un edit : marche avec tes vrais edits (musique bien retrouvée)",
-    "Sons reconnus beaucoup plus précisément, sans faux sons",
+    "Nouveau : « Photo des sons » — une image de tous les sons utilisés, à partager",
+    "Apprendre d'un edit : marche avec tes vrais edits",
     "L'IA reprend en priorité les sons que tu utilises le plus",
 ]
 

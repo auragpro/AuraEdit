@@ -243,6 +243,9 @@ class SoundsTab(QWidget):
         self.level = QLabel()
         self.btn_preview = QPushButton("▶  Écouter l'aperçu")
         self.btn_export = QPushButton("Exporter les WAV...")
+        self.btn_photo = QPushButton("Photo des sons...")
+        self.btn_photo.setToolTip("Une image avec tous les sons utilisés, à partager")
+        self.btn_photo.clicked.connect(self.photo)
         self.btn_validate = QPushButton("Valider : l'IA apprend")
         self.btn_validate.setObjectName("primary")
         b_reset = QPushButton("Réinitialiser l'IA")
@@ -256,6 +259,7 @@ class SoundsTab(QWidget):
         bottom.addWidget(b_reset)
         bottom.addWidget(self.btn_preview)
         bottom.addWidget(self.btn_export)
+        bottom.addWidget(self.btn_photo)
         bottom.addWidget(self.btn_validate)
 
         right = QVBoxLayout()
@@ -592,6 +596,23 @@ class SoundsTab(QWidget):
             open_file(mix)
         except OSError as e:
             QMessageBox.warning(self, "Aperçu", f"Impossible d'ouvrir l'aperçu : {e}")
+
+    def photo(self):
+        from ..sounds_photo import make_photo
+        if not self.placements:
+            QMessageBox.information(self, "Photo des sons", "Aucun son placé pour l'instant.")
+            return
+        base = "".join(c if c.isalnum() or c in " -_" else "_" for c in self.project.name).strip() or "edit"
+        path, _ = QFileDialog.getSaveFileName(self, "Enregistrer la photo des sons",
+                                              str(Path.home() / "Pictures" / f"{base} - sons.png"), "Image (*.png)")
+        if not path:
+            return
+        try:
+            make_photo(self.placements, self.project.music, self.project.name, path)
+        except OSError as e:
+            QMessageBox.warning(self, "Photo des sons", str(e))
+            return
+        open_file(path)
 
     def export(self):
         if not self._can_render():
