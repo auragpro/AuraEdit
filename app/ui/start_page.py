@@ -13,9 +13,9 @@ from version import __version__
 from .style import RED, asset
 
 WHATS_NEW = [
-    "Nouveau : time remap sur les kunais",
-    "Bouton « ⏱ Time remap... » dans l'onglet Kunai (ou double-clic)",
-    "Réglages des kunais gardés à part de ceux des couteaux"]
+    "Time remap : keyframe 1 = 1re frame où le couteau sort",
+    "Keyframe 2 = flick away + 20 frames",
+    "Détection qui marche même sans bannière de kill"]
 
 
 def ago(ts):

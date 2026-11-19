@@ -325,11 +325,11 @@ class TimeRemapDialog(QDialog):
             self.knife_img.setPixmap(pix.scaled(160, 90, Qt.AspectRatioMode.KeepAspectRatio,
                                                 Qt.TransformationMode.SmoothTransformation))
         if k.get("duree"):
-            self.knife_info.setText(f"Je connais ce couteau : le time remap va de la keyframe 1 à "
-                                    f"{k['duree'] * tr.FPS:.0f} frames plus loin.")
+            self.knife_info.setText("Keyframe 1 = 1re frame du couteau, keyframe 2 = flick away + 20 frames. "
+                                    f"Si le flick n'est pas trouvé : {k['duree'] * tr.FPS:.0f} frames après la 1.")
         else:
-            self.knife_info.setText("Nouveau couteau : vérifie bien les 2 keyframes, je retiens ton réglage "
-                                    "et la frame « couteau sorti » devient son image.")
+            self.knife_info.setText("Keyframe 1 = 1re frame du couteau, keyframe 2 = flick away + 20 frames. "
+                                    "Vérifie les 2 keyframes : la frame « couteau sorti » devient l'image du couteau.")
 
     def pick_image(self):
         f, _ = QFileDialog.getOpenFileName(self, "Image du couteau (capture du couteau sorti)", "",
@@ -357,26 +357,31 @@ class TimeRemapDialog(QDialog):
         self.kill.clear()
         for i, k in enumerate(a.kills):
             self.kill.addItem(f"Kill {i + 1} ({k / tr.FPS:.2f} s)")
-        self.kill.setCurrentIndex(len(a.kills) - 1)
+        start, end = a.keyframes()
+        if self.kunai:                      # kunai : le kunai part au kill, puis la durée retenue
+            kill = a.kills[-1] / tr.FPS if a.kills else start
+            d = (self.cfg.get("kunai_reglages") or {}).get("duree") or 0.5
+            start, end = kill, min(a.length - 1 / tr.FPS, kill + d)
+        before = [i for i, k in enumerate(a.kills) if k <= start * tr.FPS + tr.FPS // 2]
+        self.kill.setCurrentIndex(before[-1] if before else max(0, len(a.kills) - 1))
         self.kill.blockSignals(False)
         self.kill.setVisible(len(a.kills) > 1)
-        start, end = a.keyframes(-1)
         self._ready(start, end, a.length)
-        if a.kills:
-            what = "le kunai part" if self.kunai else "1re frame sans le couteau"
-            self.status.setText(f"{len(a.kills)} kill(s) trouvé(s). Keyframe 1 = {what} "
-                                f"après le kill à {a.kills[-1] / tr.FPS:.2f} s. Si c'est mauvais, déplace les "
-                                "curseurs ou choisis un autre kill.")
-        else:
-            self.status.setText("Je n'ai pas trouvé la bannière de kill : vérifie bien les 2 keyframes.")
+        flick = "flick away trouvé" if a.flick is not None else "flick away pas trouvé (fin estimée)"
+        self.status.setText(f"Keyframe 1 = 1re frame du couteau ({start:.2f} s). Keyframe 2 = flick away + 20 frames "
+                            f"({end:.2f} s, {flick}). Si c'est mauvais, déplace les curseurs ou choisis un autre kill.")
 
     def _kill_changed(self, i):
         if self.analysis is None or i < 0:
             return
         start, end = self.analysis.keyframes(i)
+        if self.kunai:
+            kill = self.analysis.kills[i] / tr.FPS
+            d = (self.cfg.get("kunai_reglages") or {}).get("duree") or 0.5
+            start, end = kill, min(self.analysis.length - 1 / tr.FPS, kill + d)
         self._ready(start, end, self.analysis.length)
-        self.status.setText(f"Keyframe 1 = 1re frame sans le couteau après le kill à "
-                            f"{self.analysis.kills[i] / tr.FPS:.2f} s.")
+        self.status.setText(f"Kill à {self.analysis.kills[i] / tr.FPS:.2f} s : keyframe 1 = 1re frame du couteau, "
+                            "keyframe 2 = flick away + 20 frames.")
 
     def _ready(self, start, end, length):
         if length is None:

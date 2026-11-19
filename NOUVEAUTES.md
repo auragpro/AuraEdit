@@ -1,3 +1,12 @@
+## Nouveautés de la version 0.7.4
+
+- **Détection du time remap des clips refaite** :
+  - **Keyframe 1** = la **1re frame où ton perso sort le couteau**, juste après avoir rangé son arme au kill. L'app saute les frames où les mains sont vides.
+  - **Keyframe 2** = le **flick away** (le gros mouvement de caméra) **+ 20 frames**.
+  - L'app part du flick, recule jusqu'au moment où l'arme disparaît, puis avance jusqu'au couteau. Ça marche même quand la bannière de kill n'est pas trouvée.
+  - Si un clip a plusieurs kills, choisis le bon kill dans la liste : la détection repart de cette bannière.
+- Le texte sous les keyframes dit si le flick away a été trouvé.
+
 ## Nouveautés de la version 0.7.3
 
 - **Nouveau : le time remap marche sur les kunais.**

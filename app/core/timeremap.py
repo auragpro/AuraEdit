@@ -1,8 +1,8 @@
 """Time remap des clips de couteau, comme dans After Effects.
 
 3 keyframes de Time Remap :
-  1. au début du clip  -> la frame où le perso sort le couteau (plus de mains à l'écran)
-  2. presque à la fin  -> la frame « couteau sorti » (jusqu'où va le time remap)
+  1. la 1re frame où le perso sort le couteau (après avoir rangé son arme, juste après le kill)
+  2. le flick away + 20 frames (jusqu'où va le time remap)
   3. à la fin          -> copie de la 1re : retour en arrière (reverse)
 Entre 1 et 2 : courbe 1 ; entre 2 et 3 : courbe 2 (format « x1, y1, x2, y2 » comme Flow / AE).
 Pixel Motion : images intermédiaires calculées (flux optique) pour un ralenti fluide sans images dédoublées.
@@ -218,8 +218,25 @@ def find_kills(path):
     return kills
 
 
+GLOBAL = "crop=iw*0.6:ih*0.5:iw*0.2:ih*0.15,scale=64:36"     # centre de l'image (sans le HUD) pour le flick
+FLICK_FRAMES = 20                                              # keyframe 2 = flick away + 20 frames
+
+
+def global_frames(path):
+    p = subprocess.run([audio.ffmpeg_exe(), "-hide_banner", "-loglevel", "error", "-i", str(path), "-an",
+                        "-vf", f"fps={FPS},{GLOBAL}", "-f", "rawvideo", "-pix_fmt", "gray", "-"],
+                       capture_output=True, creationflags=audio._NO_WINDOW)
+    data = np.frombuffer(p.stdout, dtype=np.uint8)
+    n = len(data) // (64 * 36)
+    return data[:n * 64 * 36].reshape(n, 64 * 36).astype(np.float32)
+
+
 class Analysis:
-    """Résultat de l'analyse d'un clip : kills trouvés + keyframes pour le kill choisi."""
+    """Résultat de l'analyse d'un clip : kills trouvés + keyframes pour le kill choisi.
+
+    Keyframe 1 : bannière de kill -> on recule jusqu'à l'arme (avant le kill) -> on avance jusqu'à la
+                 1re frame où le couteau sort (après que l'arme est rangée).
+    Keyframe 2 : le flick away (gros mouvement de toute l'image) + 20 frames."""
 
     def __init__(self, path, knife=None):
         self.knife = knife or {}
@@ -229,50 +246,106 @@ class Analysis:
             raise ValueError("Vidéo illisible ou trop courte.")
         self.F = _norm(self.frames)
         self.kills = [k for k in find_kills(path) if k < self.n - 2]
-        self.sims = None
-        img = self.knife.get("image")
-        if img and Path(img).is_file():
-            tmpl = region_image(img)
-            if tmpl is not None:
-                self.sims = self.F @ _norm(tmpl[None])[0]
         self.length = self.n / FPS
+        # changement de la zone des mains par rapport aux frames juste avant
+        n = self.n
+        self.chg = np.zeros(n)
+        for i in range(10, n):
+            ref = self.F[i - 10:i - 2].mean(axis=0)
+            self.chg[i] = 1 - float(self.F[i] @ ref) / (np.linalg.norm(ref) + 1e-6)
+        # mouvement de toute l'image (flick away)
+        G = global_frames(path)
+        m = np.zeros(n)
+        k = min(n, len(G))
+        if k > 1:
+            m[1:k] = np.abs(np.diff(G[:k], axis=0)).mean(axis=1)
+        for i in range(1, n):                       # clips à 120 i/s : une frame sur deux est un doublon
+            if m[i] < 0.5 and i + 1 < n:
+                m[i] = max(m[i - 1], m[i + 1])
+        self.mot = m
 
-    def keyframes(self, kill_index=-1):
-        """(début, fin) en secondes. début = 1re frame sans le couteau après le kill choisi."""
-        F, n = self.F, self.n
-        if self.kills:
-            kill = self.kills[kill_index]
-            ref = F[max(0, kill - 6):kill + 1].mean(axis=0)          # le couteau au moment du kill
-            ref /= np.linalg.norm(ref) + 1e-6
-            hi = min(n, kill + 3 * FPS)
-            sim = F[kill:hi] @ ref
-            base = float(np.median(F[max(0, kill - 15):kill + 1] @ ref))
-            low = float(sim.min())
-            if base - low > 0.12:
-                thr = base - 0.6 * (base - low)
-                start = kill + int(np.argmax(sim <= thr))
-            else:
-                start = kill + int(np.argmin(sim))
-        else:
-            # pas de kill trouvé : le plus gros changement dans la zone des mains
-            diff = np.abs(np.diff(self.frames.astype(np.int16), axis=0)).mean(axis=1)
-            k = max(1, FPS // 10)
-            start = int(np.argmax(np.convolve(diff, np.ones(k) / k, mode="same")))
-            ref, base, low = F[max(0, start - 10)], 1.0, 0.0
-        start = min(start, n - 2)
+    def _switch(self, i):
+        """Vrai si la zone des mains change pour de bon à la frame i (arme rangée / couteau sorti)."""
+        n, F = self.n, self.F
+        if i < 10 or i + 8 >= n or self.chg[i] < 0.45:
+            return False
+        before = F[max(0, i - 12):i - 2].mean(axis=0)
+        before /= np.linalg.norm(before) + 1e-6
+        after = F[i + 3:min(n, i + 20)] @ before
+        return float(np.median(after)) < 0.55
+
+    def _knife_start(self, s):
+        """Depuis le début du changement : saute les frames vides (mains vides) et garde la 1re frame
+        où le couteau apparaît (la plus forte montée du changement au début)."""
+        n, c = self.n, self.chg
+        j = s
+        gap = [k for k in range(s + 1, min(n, s + 5)) if c[k] < 0.5]
+        if gap:                                      # arme rangée puis mains vides : on attend le couteau
+            nxt = [k for k in range(gap[0], min(n, gap[0] + 12)) if c[k] >= 0.5]
+            if nxt:
+                j = nxt[0]
+        best, bj = 0.0, j
+        for k in range(j, min(n, j + 4)):
+            d = c[k] - c[k - 1]
+            if d > best + 0.05:
+                best, bj = d, k
+        return bj if best >= 0.2 else j
+
+    def _flicks(self):
+        """Pics de mouvement de toute l'image (flick away), dans l'ordre."""
+        m, n = self.mot, self.n
+        med = float(np.median(m[m > 0])) if np.any(m > 0) else 0.0
+        thr = max(22.0, 3.0 * med)
+        return [i for i in range(1, n - 1) if m[i] >= thr and m[i] >= m[i - 1] and m[i] >= m[i + 1]]
+
+    def _drop(self, s):
+        """Combien l'arme disparaît au changement s (petit = l'arme a vraiment été rangée)."""
+        F = self.F
+        g = F[max(0, s - 25):max(1, s - 3)].mean(axis=0)
+        g /= np.linalg.norm(g) + 1e-6
+        pre = float(np.mean(F[max(0, s - 25):max(1, s - 3)] @ g))
+        post = float(np.mean(F[s + 3:min(self.n, s + 25)] @ g))
+        return post / max(pre, 1e-3)
+
+    def keyframes(self, kill_index=None):
+        """(début, fin) en secondes.
+
+        On part du flick away (gros mouvement de toute l'image) qui suit le kill, on recule jusqu'au
+        changement arme -> couteau juste avant (celui où l'arme disparaît le plus), puis on avance à la
+        1re frame du couteau. Keyframe 2 = flick + 20 frames."""
+        n = self.n
+        cands = [i for i in range(10, n - 8) if self._switch(i)]
+        starts = [i for k, i in enumerate(cands) if k == 0 or i - cands[k - 1] > 6]
+        flicks = self._flicks()
+        lo = 0
+        if kill_index is not None and self.kills:
+            lo = self.kills[kill_index] - FPS // 2              # la bannière choisie : on recule un peu
+        s = flick = None
+        for f in flicks:
+            if f < lo:
+                continue
+            win = [i for i in starts if f - int(1.3 * FPS) <= i <= f + 2 and i >= lo - FPS // 2]
+            if win:
+                s = min(win, key=self._drop)
+                flick = f
+                break
+        if s is None:                                           # pas de flick net : le changement le plus fort
+            pool = [i for i in starts if i >= lo] or starts
+            s = min(pool, key=self._drop) if pool else int(np.argmax(self.chg))
+        start = min(self._knife_start(s), n - 2)
+        if flick is None or flick < start - 3:
+            later = [f for f in flicks if f >= start - 3]
+            flick = later[0] if later else None
 
         duree = self.knife.get("duree")
-        if duree:
+        if flick is not None:
+            end = flick + FLICK_FRAMES
+        elif duree:
             end = start + int(round(duree * FPS))
-        elif self.sims is not None and start + 2 < n:
-            after = self.sims[start + 2:]
-            end = start + 2 + int(np.argmax(after >= float(after.max()) * 0.92))
         else:
-            # le couteau revient : la zone redevient comme au moment du kill
-            sim = F[start + 3:min(n, start + 3 * FPS)] @ ref
-            back = np.nonzero(sim >= base - 0.2 * (base - low))[0] if len(sim) else []
-            end = start + 3 + int(back[0]) if len(back) else start + FPS // 2
+            end = start + FLICK_FRAMES + FPS // 6
         end = min(max(end, start + 1), n - 1)
+        self.flick = flick
         return start / FPS, end / FPS
 
 
