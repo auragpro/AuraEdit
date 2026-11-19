@@ -13,9 +13,9 @@ from version import __version__
 from .style import RED, asset
 
 WHATS_NEW = [
+    "Kunai et Dash : une main gauche et une main droite, chacune ses vidéos",
     "Mises à jour légères : seulement quelques centaines de Ko à télécharger",
     "Onglet Montage : Intro, Musique, Clips, Kunai et Dash en gros carrés",
-    "« Générer l'edit » fait le rendu MP4 de ton montage",
 ]
 
 

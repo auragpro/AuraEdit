@@ -42,14 +42,40 @@ def projects_dir():
 @dataclass
 class KunaiSettings:
     enabled: bool = True
-    position: str = "les deux"                  # "gauche", "droite" ou "les deux"
-    videos: list[str] = field(default_factory=list)   # vidéos de kills avec Jett
+    position: str = "les deux"                  # (ancien réglage, gardé pour compatibilité)
+    videos: list[str] = field(default_factory=list)   # toutes les vidéos (gauche puis droite)
+    gauche: list[str] = field(default_factory=list)   # vidéos de la main gauche
+    droite: list[str] = field(default_factory=list)   # vidéos de la main droite
+
+    def sync(self):
+        self.videos = list(dict.fromkeys(self.gauche + self.droite))
 
 
 @dataclass
 class DashSettings:
     enabled: bool = True
-    videos: list[str] = field(default_factory=list)   # vidéos de dash (Jett)
+    videos: list[str] = field(default_factory=list)   # toutes les vidéos (gauche puis droite)
+    gauche: list[str] = field(default_factory=list)
+    droite: list[str] = field(default_factory=list)
+
+    def sync(self):
+        self.videos = list(dict.fromkeys(self.gauche + self.droite))
+
+
+def _hands(cls, data, **extra):
+    """Charge kunai/dash ; un ancien projet (une seule liste) passe dans la main gauche."""
+    data = data if isinstance(data, dict) else {}
+    videos = [str(v) for v in data.get("videos") or []]
+    g = [str(v) for v in data.get("gauche") or []]
+    d = [str(v) for v in data.get("droite") or []]
+    if not g and not d:
+        if extra.get("position") == "droite":
+            d = videos
+        else:
+            g = videos
+    obj = cls(enabled=bool(data.get("enabled", True)), gauche=g, droite=d, **extra)
+    obj.sync()
+    return obj
 
 
 def default_sons():
@@ -114,12 +140,9 @@ class Project:
             outro=data.get("outro"),
             music=data.get("music"),
             clips=[str(c) for c in data.get("clips") or []],
-            kunai=KunaiSettings(enabled=bool(kunai.get("enabled", True)),
-                                position=pos if pos in KUNAI_POSITIONS else "les deux",
-                                videos=[str(v) for v in kunai.get("videos") or []]),
+            kunai=_hands(KunaiSettings, kunai, position=pos if pos in KUNAI_POSITIONS else "les deux"),
             sons={**default_sons(), **(data.get("sons") if isinstance(data.get("sons"), dict) else {})},
-            dash=DashSettings(enabled=bool((data.get("dash") or {}).get("enabled", True)),
-                              videos=[str(v) for v in (data.get("dash") or {}).get("videos") or []]),
+            dash=_hands(DashSettings, data.get("dash")),
             render=data.get("render") if isinstance(data.get("render"), dict) else {},
             path=str(path),
         )

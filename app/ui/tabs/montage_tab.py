@@ -99,14 +99,19 @@ class MontageTab(QWidget):
         p = self.project
         def name(f):
             return Path(f).name if f else None
+
+        def hands(st):
+            if not st.enabled:
+                return "désactivé"
+            if not st.videos:
+                return "✗ aucune vidéo"
+            return f"✓ gauche {len(st.gauche)} · droite {len(st.droite)}"
         info = {
             "Intro": ("✓ " + name(p.intro)) if p.intro else "✗ à choisir",
             "Musique": ("✓ " + name(p.music)) if p.music else "✗ à choisir",
             "Clips": f"✓ {len(p.clips)} clip(s)" if p.clips else "✗ aucun clip",
-            "Kunai": ("désactivé" if not p.kunai.enabled else
-                      f"✓ {len(p.kunai.videos)} vidéo(s)" if p.kunai.videos else "✗ aucune vidéo"),
-            "Dash": ("désactivé" if not p.dash.enabled else
-                     f"✓ {len(p.dash.videos)} vidéo(s)" if p.dash.videos else "✗ aucune vidéo"),
+            "Kunai": hands(p.kunai),
+            "Dash": hands(p.dash),
             "Générer": "rendu MP4",
         }
         for n, b in self.tiles.items():

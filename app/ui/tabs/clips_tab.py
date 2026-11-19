@@ -166,10 +166,11 @@ class ClipsTab(QWidget):
 
     def _label_of(self, path):
         """Petit préfixe dans l'ordre de l'edit : [couteau], Kunai, Dash."""
-        if path in self.project.kunai.videos:
-            return "Kunai"
-        if path in self.project.dash.videos:
-            return "Dash"
+        for name, st in (("Kunai", self.project.kunai), ("Dash", self.project.dash)):
+            if path in st.gauche:
+                return f"{name} gauche"
+            if path in st.droite:
+                return f"{name} droite"
         for name, clips in self.folders.items():
             if path in clips:
                 return name
@@ -205,11 +206,14 @@ class ClipsTab(QWidget):
             if not self.folders and not self.found_paths:
                 self.status.setText("Crée un dossier par couteau avec « Nouveau dossier », puis ajoute ses clips.")
         else:
-            videos = self.project.kunai.videos if self.mode == "Kunai" else self.project.dash.videos
-            top = QTreeWidgetItem(self.tree, [f"{self.mode}  ({len(videos)})"])
-            top.setData(0, ROLE_DIR, self.mode)
-            for v in videos:
-                self._clip_child(top, v)
+            st = self.project.kunai if self.mode == "Kunai" else self.project.dash
+            videos = st.videos
+            for side, icon in (("gauche", "✋"), ("droite", "🤚")):
+                lst = getattr(st, side)
+                top = QTreeWidgetItem(self.tree, [f"{icon} {self.mode} main {side}  ({len(lst)})"])
+                top.setData(0, ROLE_DIR, f"{self.mode} {side}")
+                for v in lst:
+                    self._clip_child(top, v)
             self.status.setText("" if videos else f"Aucune vidéo : ajoute-les dans l'onglet {self.mode}.")
         self.tree.expandAll()
         for i in range(self.order.count()):       # met à jour les préfixes
