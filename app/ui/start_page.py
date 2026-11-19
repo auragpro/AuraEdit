@@ -13,9 +13,9 @@ from version import __version__
 from .style import RED, asset
 
 WHATS_NEW = [
-    "Nouveau : Shake « Hit Impulse » sur chaque coupe (IN / OUT 1x à 5x)",
-    "Shake : réglage de la durée (9 crans) et du seed",
-    "Le shake est posé automatiquement quand tu génères l'edit"]
+    "Shakes refaits : le PEAK tombe pile sur chaque coupe, comme dans Motion Bro",
+    "Durée normale : 4 images avant le peak, 20 après (9 crans)",
+    "IN / OUT 1x à 5x en un seul choix, seed retiré"]
 
 
 def ago(ts):

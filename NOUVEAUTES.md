@@ -1,13 +1,10 @@
-## Nouveautés de la version 0.6.9
+## Nouveautés de la version 0.7.0
 
-- **Nouveau : les shakes « Hit Impulse »**, refaits d'après le preset Motion Bro que tu utilises. Va dans **Montage → 💥 Shake**.
-- **IN 1x → 5x** : le shake monte jusqu'à la coupe (fin du clip d'avant).
-- **OUT 1x → 5x** : le shake part de la coupe et retombe (début du clip suivant). Tu peux mettre IN et OUT ensemble, ou **Off**.
-- Chaque niveau reprend les valeurs du preset :
-  - zoom arrière de 97 % à 80 %, avec les bords en miroir ;
-  - tremblement de position de 25 à 60 px ;
-  - tremblement de rotation ;
-  - décalage de couleurs (chromatique) de 5 à 9 px.
-- **Duration** : 9 crans comme dans Motion Bro. Le 5ᵉ est la durée normale ; à gauche c'est plus court, à droite plus long.
-- **Seed** : change le tremblement (🎲 pour un seed aléatoire). Chaque coupe a son propre tremblement.
-- Les shakes sont posés **automatiquement sur chaque coupe** quand tu cliques **« Générer l'edit »**.
+- **Shakes « Hit Impulse » refaits** pour être comme dans Motion Bro :
+  - le **PEAK** (moment où le shake est le plus fort) tombe **pile sur chaque coupe entre 2 clips**, y compris les clips en time remap ;
+  - **durée normale (5ᵉ cran)** : **4 images avant le peak et 20 images après** ;
+  - les 9 crans de **Duration** resserrent ou allongent le shake autour du peak ;
+  - au peak : gros coup de position, punch de zoom, puis rotation et décalage de couleurs qui retombent.
+- Si un shake déborde sur le clip suivant ou sur un autre shake, **il est fait quand même** (les shakes s'additionnent).
+- **IN 1x → 5x** (punch en zoom avant) et **OUT 1x → 5x** (punch en zoom arrière) : un seul choix, comme dans Motion Bro.
+- Le **seed** a été retiré.

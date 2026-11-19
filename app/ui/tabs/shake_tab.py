@@ -1,8 +1,6 @@
-"""Onglet Shake : le shake « Hit Impulse » posé sur chaque coupe (IN 1x–5x, OUT 1x–5x, durée, seed)."""
-import random
-
+"""Onglet Shake : le shake « Hit Impulse » (IN 1x–5x / OUT 1x–5x + durée), peak sur chaque coupe."""
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtWidgets import (QButtonGroup, QCheckBox, QFrame, QHBoxLayout, QLabel, QPushButton, QSpinBox,
+from PyQt6.QtWidgets import (QButtonGroup, QCheckBox, QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton,
                              QVBoxLayout, QWidget)
 
 from app.core import shake
@@ -11,13 +9,13 @@ from ..style import PANEL_2, RED
 from ..widgets import page_header
 
 BTN = f"""
-QPushButton {{ background: {PANEL_2}; border: 1px solid #3a3f4b; border-radius: 6px; padding: 10px 0;
-              font-weight: 600; min-width: 54px; }}
+QPushButton {{ background: {PANEL_2}; border: 1px solid #3a3f4b; border-radius: 6px; padding: 12px 0;
+              font-weight: 600; min-width: 64px; }}
 QPushButton:checked {{ background: {RED}; border-color: {RED}; color: white; }}
 QPushButton:hover {{ border-color: {RED}; }}
 """
 SEG = f"""
-QPushButton {{ background: {PANEL_2}; border: none; border-radius: 3px; min-width: 26px; min-height: 22px; }}
+QPushButton {{ background: {PANEL_2}; border: none; border-radius: 3px; min-width: 30px; min-height: 22px; }}
 QPushButton:checked {{ background: {RED}; }}
 """
 
@@ -42,29 +40,27 @@ class ShakeTab(QWidget):
         title = QLabel("Hit Impulse")
         title.setStyleSheet("font-size: 18px; font-weight: 700;")
         cl.addWidget(title)
-        self.groups = {}
-        for side, label, tip in (("in", "IN", "monte jusqu'à la coupe (fin du clip d'avant)"),
-                                 ("out", "OUT", "part de la coupe et retombe (début du clip suivant)")):
-            row = QHBoxLayout()
-            lab = QLabel(label)
-            lab.setFixedWidth(46)
+
+        grid = QGridLayout()
+        grid.setSpacing(8)
+        self.group = QButtonGroup(self)
+        self.group.setExclusive(True)
+        for r, side in enumerate(("in", "out")):
+            lab = QLabel(side.upper())
             lab.setStyleSheet("font-weight: 700; font-size: 15px;")
-            lab.setToolTip(tip)
-            row.addWidget(lab)
-            g = QButtonGroup(self)
-            g.setExclusive(True)
-            for lvl in range(0, 6):
-                b = QPushButton("Off" if lvl == 0 else f"{lvl}x")
+            lab.setToolTip("IN : punch en zoom avant" if side == "in" else "OUT : punch en zoom arrière")
+            grid.addWidget(lab, r, 0)
+            for lvl in range(1, 6):
+                b = QPushButton(f"{lvl}x")
                 b.setCheckable(True)
                 b.setStyleSheet(BTN)
                 b.setCursor(Qt.CursorShape.PointingHandCursor)
-                b.setChecked(self.cfg[side] == lvl)
-                g.addButton(b, lvl)
-                row.addWidget(b)
-            g.idClicked.connect(self._save)
-            self.groups[side] = g
-            row.addStretch(1)
-            cl.addLayout(row)
+                b.setChecked(self.cfg["sens"] == side and self.cfg["niveau"] == lvl)
+                self.group.addButton(b, (10 if side == "out" else 0) + lvl)
+                grid.addWidget(b, r, lvl)
+        grid.setColumnStretch(6, 1)
+        self.group.idClicked.connect(self._save)
+        cl.addLayout(grid)
 
         drow = QHBoxLayout()
         dl = QLabel("Duration")
@@ -75,7 +71,6 @@ class ShakeTab(QWidget):
             b = QPushButton()
             b.setCheckable(True)
             b.setStyleSheet(SEG)
-            b.setToolTip(f"×{shake.DURATIONS[i - 1]:g}" + (" (normal)" if i == 5 else ""))
             b.setChecked(self.cfg["duree"] == i)
             self.dur.addButton(b, i)
             drow.addWidget(b)
@@ -87,31 +82,16 @@ class ShakeTab(QWidget):
         drow.addStretch(1)
         cl.addLayout(drow)
 
-        srow = QHBoxLayout()
-        sl = QLabel("Seed")
-        sl.setFixedWidth(70)
-        srow.addWidget(sl)
-        self.seed = QSpinBox()
-        self.seed.setRange(0, 99999)
-        self.seed.setValue(self.cfg["seed"])
-        self.seed.valueChanged.connect(self._save)
-        dice = QPushButton("🎲 Aléatoire")
-        dice.clicked.connect(lambda: self.seed.setValue(random.randint(0, 99999)))
-        srow.addWidget(self.seed)
-        srow.addWidget(dice)
-        srow.addStretch(1)
-        cl.addLayout(srow)
-
-        hint = QLabel("Chaque niveau ajoute un zoom arrière (bords en miroir), un tremblement de position et de "
-                      "rotation et un décalage de couleurs, plus forts de 1x à 5x. Le seed change le tremblement ; "
-                      "chaque coupe a son propre tremblement. Le shake est posé quand tu cliques « Générer l'edit ».")
+        hint = QLabel("Le PEAK (moment le plus fort du shake) tombe pile sur chaque coupe entre 2 clips, "
+                      "clips en time remap compris. Si deux shakes se chevauchent, ils s'additionnent. "
+                      "Le shake est posé quand tu cliques « Générer l'edit ».")
         hint.setObjectName("hint")
         hint.setWordWrap(True)
 
         lay = QVBoxLayout(self)
         lay.setContentsMargins(32, 28, 32, 28)
         lay.setSpacing(14)
-        lay.addWidget(page_header("Shake", "Le shake entre chaque clip, comme le preset Hit Impulse."))
+        lay.addWidget(page_header("Shake", "Le shake Hit Impulse entre chaque clip."))
         lay.addWidget(self.enable)
         lay.addWidget(card)
         lay.addWidget(hint)
@@ -121,20 +101,21 @@ class ShakeTab(QWidget):
 
     def _refresh(self):
         self.card.setEnabled(self.enable.isChecked())
-        d = self.cfg["duree"]
-        self.dur_label.setText(f"×{shake.DURATIONS[d - 1]:g}" + (" (normal)" if d == 5 else ""))
+        k = shake.DURATIONS[self.cfg["duree"] - 1]
+        avant, apres = shake.BEFORE * k, shake.AFTER * k
+        self.dur_label.setText(f"{avant:g} images avant le peak · {apres:g} après"
+                               + (" (normal)" if self.cfg["duree"] == 5 else ""))
 
     def _save(self, *_):
-        self.cfg = shake.clean({"actif": self.enable.isChecked(), "in": self.groups["in"].checkedId(),
-                                "out": self.groups["out"].checkedId(), "duree": self.dur.checkedId(),
-                                "seed": self.seed.value()})
+        gid = self.group.checkedId()
+        self.cfg = shake.clean({"actif": self.enable.isChecked(), "sens": "out" if gid > 10 else "in",
+                                "niveau": gid % 10, "duree": self.dur.checkedId()})
         self.project.shakes = dict(self.cfg)
         self._refresh()
         self.changed.emit()
 
     def summary(self):
         c = shake.clean(self.project.shakes)
-        if not c["actif"] or not (c["in"] or c["out"]):
+        if not c["actif"]:
             return "désactivé"
-        f = lambda v: f"{v}x" if v else "off"
-        return f"✓ IN {f(c['in'])} · OUT {f(c['out'])}"
+        return f"✓ {c['sens'].upper()} {c['niveau']}x"

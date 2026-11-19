@@ -1,9 +1,9 @@
-"""Shakes « Hit Impulse » posés sur chaque coupe de l'edit.
+"""Shakes « Hit Impulse » posés sur chaque coupe de l'edit : le PEAK (moment le plus fort) tombe
+pile sur la coupe entre 2 clips. Durée normale : 4 images avant le peak, 20 après (à 60 i/s).
 
-Recréé à partir des réglages du preset Hit Impulse (pack Simple) : à chaque niveau 1x → 5x, un léger
-zoom arrière avec bords en miroir, un tremblement de position (wiggle), un tremblement de rotation et
-un décalage de couleurs (chromatique). OUT = le shake part de la coupe et retombe ; IN = il monte
-jusqu'à la coupe. La durée (9 crans, 5 = normal) étire ou resserre tout l'effet.
+Recréé à partir du preset Hit Impulse (pack Simple) : léger zoom (bords en miroir), tremblement de
+position et de rotation, décalage de couleurs, plus forts de 1x à 5x. IN = punch en zoom avant,
+OUT = punch en zoom arrière. Les 9 crans de durée étirent ou resserrent le shake autour du peak.
 """
 import math
 import subprocess
@@ -14,35 +14,40 @@ import numpy as np
 
 from . import audio
 
-BASE_FPS = 25.0          # les images clés du preset sont comptées en images à 25 i/s
-# niveau : (zoom mini, amplitude position px, décalage chromatique px)
+FPS_REF = 60.0           # durées comptées en images de l'edit (60 i/s)
+# niveau : (zoom au peak, amplitude position px, décalage chromatique px)
 LEVELS = {1: (0.97, 25, 5), 2: (0.95, 30, 6), 3: (0.90, 35, 7), 4: (0.85, 45, 8), 5: (0.80, 60, 9)}
 ROT_AMP = 4.5            # degrés
 POS_FREQ, ROT_FREQ = 5.0, 10.0
-DURATIONS = [0.4, 0.55, 0.7, 0.85, 1.0, 1.25, 1.5, 1.75, 2.0]     # crans 1 → 9
-# images clés (image, valeur 0..1, influence entrée, influence sortie)
+DURATIONS = [0.5, 0.625, 0.75, 0.875, 1.0, 1.25, 1.5, 1.75, 2.0]     # crans 1 → 9 (5 = 4 i. avant / 20 après)
+# images clés du preset, en images par rapport au PEAK (= la coupe) : (image, valeur, infl. entrée, infl. sortie)
 ENV = {
-    "zoom":   [(0, 0.0, 0.0, 0.125), (8, 1.0, 0.576, 0.436), (20, 0.0, 0.564, 0.0)],
-    "pos":    [(0, 0.0, 0.0, 0.756), (8, 1.0, 0.333, 0.311), (48, 0.0, 0.791, 0.0)],
-    "rot":    [(8, 0.0, 0.0, 0.756), (12, 1.0, 0.333, 0.311), (48, 0.0, 0.791, 0.0)],
-    "chroma": [(4, 0.0, 0.0, 0.333), (12, 1.0, 0.594, 0.333), (24, 0.0, 1.0, 0.0)],
+    "zoom":   [(-4, 0.0, 0.0, 0.125), (0, 1.0, 0.576, 0.436), (6, 0.0, 0.564, 0.0)],
+    "pos":    [(-4, 0.0, 0.0, 0.756), (0, 1.0, 0.333, 0.311), (20, 0.0, 0.791, 0.0)],
+    "rot":    [(0, 0.0, 0.0, 0.756), (2, 1.0, 0.333, 0.311), (20, 0.0, 0.791, 0.0)],
+    "chroma": [(-2, 0.0, 0.0, 0.333), (2, 1.0, 0.594, 0.333), (8, 0.0, 1.0, 0.0)],
 }
-LENGTH = 48              # images (25 i/s) d'un shake complet, à la durée normale
+BEFORE, AFTER = 4, 20    # images avant / après le peak à la durée normale
+SEED = 1234
 
 
 def defaults():
-    return {"actif": True, "in": 0, "out": 3, "duree": 5, "seed": 1234}
+    return {"actif": True, "sens": "out", "niveau": 3, "duree": 5}
 
 
 def clean(cfg):
     d = defaults()
     if isinstance(cfg, dict):
         d.update({k: cfg[k] for k in d if k in cfg})
+        if "sens" not in cfg and ("in" in cfg or "out" in cfg):       # ancien format (0.6.9)
+            if cfg.get("out"):
+                d["sens"], d["niveau"] = "out", cfg["out"]
+            elif cfg.get("in"):
+                d["sens"], d["niveau"] = "in", cfg["in"]
     d["actif"] = bool(d["actif"])
-    for k in ("in", "out"):
-        d[k] = max(0, min(5, int(d[k] or 0)))
+    d["sens"] = d["sens"] if d["sens"] in ("in", "out") else "out"
+    d["niveau"] = max(1, min(5, int(d["niveau"] or 3)))
     d["duree"] = max(1, min(9, int(d["duree"] or 5)))
-    d["seed"] = int(d["seed"] or 0) % 100000
     return d
 
 
@@ -80,40 +85,35 @@ def _noise(x, seed):
     def r(n):
         h = (n * 374761393 + seed * 668265263) & 0xFFFFFFFF
         h = ((h ^ (h >> 13)) * 1274126177) & 0xFFFFFFFF
-        return ((h ^ (h >> 16)) & 0xFFFF) / 32767.5 - 1.0
+        v = ((h ^ (h >> 16)) & 0xFFFF) / 32767.5 - 1.0
+        return math.copysign(0.6 + 0.4 * abs(v), v)       # toujours un vrai coup (jamais presque 0)
     s = f * f * f * (f * (f * 6 - 15) + 10)
     return r(i) + (r(i + 1) - r(i)) * s
 
 
 def frame_params(t, cuts, cfg):
-    """Paramètres de l'image à l'instant t : zoom, dx, dy, rotation (°), chromatique (px)."""
+    """Paramètres de l'image à l'instant t : zoom, dx, dy, rotation (°), chromatique (px).
+    Chaque coupe est le PEAK du shake ; les shakes qui se chevauchent s'additionnent."""
     zoom, dx, dy, rot, chroma = 1.0, 0.0, 0.0, 0.0, 0.0
     k = DURATIONS[cfg["duree"] - 1]
-    span = LENGTH / BASE_FPS * k
+    z, pa, ca = LEVELS[cfg["niveau"]]
+    zin = cfg["sens"] == "in"
     for n, c in enumerate(cuts):
-        if abs(t - c) > span:
+        f = (t - c) * FPS_REF / k               # images depuis le peak, à la durée normale
+        if f <= -BEFORE or f >= AFTER:
             continue
-        for side in ("out", "in"):
-            lvl = cfg[side]
-            if not lvl:
-                continue
-            tau = (t - c) if side == "out" else (c - t)
-            if tau < 0:
-                continue
-            f = tau * BASE_FPS / k
-            if f >= LENGTH:
-                continue
-            z, pa, ca = LEVELS[lvl]
-            seed = cfg["seed"] + n * 101 + (7 if side == "in" else 0)
-            zoom *= 1 - (1 - z) * envelope("zoom", f)
-            ep = envelope("pos", f) * pa
-            if ep:
-                dx += ep * _noise(t * POS_FREQ, seed)
-                dy += ep * _noise(t * POS_FREQ, seed + 31)
-            er = envelope("rot", f) * ROT_AMP
-            if er:
-                rot += er * _noise(t * ROT_FREQ, seed + 57)
-            chroma += envelope("chroma", f) * ca
+        seed = SEED + n * 101
+        e = envelope("zoom", f) * (1 - z)
+        zoom *= (1 + e) if zin else (1 - e)
+        ep = envelope("pos", f) * pa
+        if ep:
+            x = (t - c) * POS_FREQ / k          # coup le plus fort pile au peak
+            dx += ep * _noise(x, seed)
+            dy += ep * _noise(x, seed + 31)
+        er = envelope("rot", f) * ROT_AMP
+        if er:
+            rot += er * _noise((t - c) * ROT_FREQ / k, seed + 57)
+        chroma += envelope("chroma", f) * ca
     return zoom, dx, dy, rot, chroma
 
 
@@ -161,8 +161,7 @@ class _Warper:
 
 
 def active(cfg, cuts):
-    cfg = clean(cfg)
-    return cfg["actif"] and bool(cuts) and (cfg["in"] or cfg["out"])
+    return clean(cfg)["actif"] and bool(cuts)
 
 
 def apply(src, output, cuts, cfg, w, h, fps, total, is_cancelled=None, progress=None):
