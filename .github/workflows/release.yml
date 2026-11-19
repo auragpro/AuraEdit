@@ -71,4 +71,4 @@ jobs:
           name: AuraEdit ${{ steps.version.outputs.tag }}
           files: dist/AuraEdit.exe
           target_commitish: ${{ github.ref_name == 'main' && 'main' || github.sha }}
-          generate_release_notes: true
+          body_path: NOUVEAUTES.md        # les nouveautés écrites à la main (affichées dans la popup)
