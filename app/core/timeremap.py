@@ -322,6 +322,84 @@ def render(path, start, end, cfg, output, is_cancelled=None, progress=None):
     return _render(path, start, end, cfg, output, is_cancelled, progress)
 
 
+PAD = 4          # images source en plus de chaque côté d'un morceau (pour que l'interpolation soit identique)
+
+
+def _decode_parallel(path, lo, sfps, factor, vf, needed, last_needed, is_cancelled, progress, label):
+    """Décode (et interpole) le passage en plusieurs morceaux EN MÊME TEMPS, un par cœur du processeur.
+
+    Le filtre d'interpolation de ffmpeg n'utilise qu'un cœur : en coupant le passage en morceaux qui se
+    chevauchent de quelques images, chaque image calculée est la même qu'en un seul morceau, mais
+    on va jusqu'à N fois plus vite."""
+    import os
+    import threading
+    n_src = last_needed // factor + 2                       # images source utiles
+    workers = max(1, min(8, (os.cpu_count() or 2) - 1, n_src // 12))
+    bounds = [round(i * n_src / workers) for i in range(workers + 1)]
+    size = W * H * 3
+    frames, errors, done = {}, [], [0]
+    lock = threading.Lock()
+    procs = []
+
+    def run(j):
+        m0, m1 = bounds[j], bounds[j + 1]
+        s0 = max(0, m0 - PAD)
+        keep0, keep1 = m0 * factor, (m1 * factor if j < workers - 1 else last_needed + 1)
+        base = s0 * factor
+        errf = tempfile.TemporaryFile()
+        dec = subprocess.Popen([audio.ffmpeg_exe(), "-hide_banner", "-loglevel", "error",
+                                "-ss", f"{lo + s0 / sfps:.6f}", "-i", str(path),
+                                "-t", f"{(m1 + PAD - s0) / sfps:.6f}", "-an", "-vf", vf,
+                                "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
+                               stdout=subprocess.PIPE, stderr=errf, creationflags=audio._NO_WINDOW)
+        with lock:
+            procs.append(dec)
+        try:
+            k = 0
+            while base + k < keep1:
+                if is_cancelled and is_cancelled():
+                    return
+                buf = dec.stdout.read(size)
+                if len(buf) < size:
+                    break
+                g = base + k
+                if g >= keep0 and g in needed:
+                    with lock:
+                        frames[g] = np.frombuffer(buf, dtype=np.uint8)
+                if g >= keep0:
+                    with lock:
+                        done[0] += 1
+                k += 1
+        finally:
+            dec.kill()
+            dec.wait()
+            errf.seek(0)
+            msg = errf.read()[-600:].decode("utf-8", "replace")
+            errf.close()
+            if msg.strip():
+                with lock:
+                    errors.append(msg)
+
+    threads = [threading.Thread(target=run, args=(j,), daemon=True) for j in range(workers)]
+    for t in threads:
+        t.start()
+    while any(t.is_alive() for t in threads):
+        for t in threads:
+            t.join(0.25)
+        if is_cancelled and is_cancelled():
+            for p in procs:
+                p.kill()
+            for t in threads:
+                t.join()
+            raise InterruptedError()
+        if progress:
+            progress(0.85 * min(1.0, done[0] / (last_needed + 1)),
+                     f"{label} : calcul des images {done[0]}/{last_needed + 1} ({workers} cœurs)")
+    if not frames:
+        raise ValueError(f"Impossible de lire {Path(path).name}\n" + "".join(errors[-1:]))
+    return frames, max(frames)
+
+
 def _render(path, start, end, cfg, output, is_cancelled=None, progress=None):
     """Fabrique la partie time-remappée du clip (1920x1080, 60 i/s, sans son).
 
@@ -370,37 +448,9 @@ def _render(path, start, end, cfg, output, is_cancelled=None, progress=None):
     if mode == "motion":
         vf += f",minterpolate=fps={rate:g}:mi_mode=mci:mc_mode=obmc:me_mode=bidir"
     vf += f",scale={W}:{H}:force_original_aspect_ratio=decrease,pad={W}:{H}:(ow-iw)/2:(oh-ih)/2,setsar=1"
-    size = W * H * 3
-    frames = {}
-    errf = tempfile.TemporaryFile()
-    dec = subprocess.Popen([audio.ffmpeg_exe(), "-hide_banner", "-loglevel", "error", "-ss", f"{lo:.4f}",
-                            "-i", str(path), "-t", f"{hi - lo:.4f}", "-an", "-vf", vf,
-                            "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
-                           stdout=subprocess.PIPE, stderr=errf, creationflags=audio._NO_WINDOW)
     label = "Pixel Motion" if mode == "motion" else "time remap"
-    idx, lastframe = 0, None
-    try:
-        while idx <= last_needed:                  # on ne garde que les images utiles (peu de mémoire)
-            if is_cancelled and is_cancelled():
-                raise InterruptedError()
-            buf = dec.stdout.read(size)
-            if len(buf) < size:
-                break
-            if idx in needed:
-                frames[idx] = np.frombuffer(buf, dtype=np.uint8)
-            lastframe = idx
-            idx += 1
-            if progress and idx % 4 == 0:
-                progress(0.85 * idx / (last_needed + 1), f"{label} : calcul des images {idx}/{last_needed + 1}")
-    finally:
-        dec.kill()
-        dec.wait()
-    if not frames:
-        errf.seek(0)
-        msg = errf.read()[-600:].decode("utf-8", "replace")
-        errf.close()
-        raise ValueError(f"Impossible de lire {Path(path).name}\n{msg}")
-    errf.close()
+    frames, lastframe = _decode_parallel(path, lo, sfps, factor, vf, needed, last_needed,
+                                         is_cancelled, progress, label)
     avail = sorted(frames)
 
     def frame(i):
@@ -422,7 +472,7 @@ def _render(path, start, end, cfg, output, is_cancelled=None, progress=None):
                 if progress and k % 8 == 0:
                     progress(0.85 + 0.15 * k / len(pos), f"{label} : assemblage {k}/{len(pos)}")
                 if len(ss) > 1:                    # flou de mouvement : moyenne des échantillons
-                    acc = np.zeros(size, np.float32)
+                    acc = np.zeros(W * H * 3, np.float32)
                     for x in ss:
                         acc += frame(int(round(min(x, top))))
                     img = np.clip(acc / len(ss) + 0.5, 0, 255).astype(np.uint8)

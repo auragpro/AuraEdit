@@ -13,8 +13,8 @@ from version import __version__
 from .style import RED, asset
 
 WHATS_NEW = [
+    "Export plus rapide : Pixel Motion sur tous les cœurs du processeur, sans perte",
     "Flickaway plus fluides : flou de mouvement sur les passages rapides",
-    "Pixel Motion plus fin (≈240 i/s) pour un ralenti sans à-coups",
     "Mes claps : choisis tes propres sons pour clip, dash et kunai",
 ]
 
