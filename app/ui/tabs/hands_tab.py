@@ -120,10 +120,25 @@ class HandsTab(QWidget):
         top = QHBoxLayout()
         top.addWidget(self.enabled)
         top.addStretch(1)
+        if self.ATTR == "dash":
+            b_split = QPushButton("✂ Couper une compilation de dash...")
+            b_split.setToolTip("Coupe une compilation à la 1re frame de chaque dash après un kill : dash1, dash2...")
+            b_split.clicked.connect(self.split_compilation)
+            top.addWidget(b_split)
         lay.addLayout(top)
         lay.addWidget(self.preview)
         lay.addLayout(cols, 1)
         self._refresh()
+
+    def split_compilation(self):
+        from ..dash_split_dialog import DashSplitDialog
+        dlg = DashSplitDialog(self)
+        if dlg.exec() and dlg.result:
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.information(self, "Compilation coupée",
+                                    f"{len(dlg.result)} dash enregistré(s) à part (dash1, dash2...).\n"
+                                    "Tu les trouves dans « Mes clips » → Dash. Ajoute-les ici dans la main voulue "
+                                    "avec « Ajouter des vidéos... ».")
 
     @property
     def settings(self):

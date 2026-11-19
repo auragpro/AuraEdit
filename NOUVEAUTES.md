@@ -1,3 +1,10 @@
+## Nouveautés de la version 0.7.9
+
+- **Couper une compilation de dash** : bouton **« ✂ Couper une compilation de dash... »** dans **Montage → Dash**.
+  - L'app repère chaque **bannière de kill**, puis la **1re frame du dash** qui suit.
+  - Tu vérifies chaque coupe à la frame près avant l'export : ◀ -1 / +1 ▶, **↔ Déplacer la coupe ici**, **➕ Coupe ici** ou 🗑 pour supprimer.
+  - Chaque dash est enregistré **à part : dash1, dash2...**, en très bonne qualité, dans **Mes clips → Dash**. La numérotation continue après les dash déjà présents.
+
 ## Nouveautés de la version 0.7.8
 
 - **Time remap sur les Dash back et les Dismiss**, comme sur les kunais.
