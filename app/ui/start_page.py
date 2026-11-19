@@ -13,9 +13,9 @@ from version import __version__
 from .style import RED, asset
 
 WHATS_NEW = [
+    "Mes claps : choisis tes propres sons pour clip, dash et kunai",
     "Frise de la musique : moments des clips, dash et kunais",
-    "Audio de claps créé automatiquement depuis tes sound kills (et relu par le logiciel)",
-    "Pixel Motion réparé, plus rapide, + bouton Aperçu dans le time remap",
+    "Audio de claps créé automatiquement depuis tes sound kills",
 ]
 
 

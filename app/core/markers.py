@@ -48,8 +48,61 @@ def _band_noise(n, lo, hi, rng):
     return x / (np.abs(x).max() + 1e-9)
 
 
+def _custom_file():
+    from .project import config_dir
+    return config_dir() / "claps.json"
+
+
+def custom_claps():
+    """{type: chemin} des claps choisis par l'utilisateur (ses propres fichiers audio)."""
+    import json
+    try:
+        d = json.loads(_custom_file().read_text(encoding="utf-8"))
+        return {k: v for k, v in d.items() if k in TYPES and isinstance(v, str) and Path(v).is_file()}
+    except (OSError, ValueError, AttributeError):
+        return {}
+
+
+def set_custom_clap(kind, path):
+    """path=None : revenir au clap du logiciel."""
+    import json
+    d = custom_claps()
+    if path:
+        d[kind] = str(path)
+    else:
+        d.pop(kind, None)
+    try:
+        _custom_file().write_text(json.dumps(d, ensure_ascii=False, indent=1), encoding="utf-8")
+    except OSError:
+        pass
+    _CACHE.pop(kind, None)
+
+
+_CACHE = {}
+
+
 def clap(kind):
-    """Les 3 claps, bien différents pour que le logiciel les reconnaisse."""
+    """Le clap de ce type : ton fichier s'il y en a un, sinon celui du logiciel."""
+    path = custom_claps().get(kind)
+    if path:
+        key = (path, Path(path).stat().st_mtime)
+        if kind in _CACHE and _CACHE[kind][0] == key:
+            return _CACHE[kind][1]
+        try:
+            y = audio.load(path, SR, 1)[: int(1.5 * SR)]      # 1,5 s max
+            nz = np.nonzero(np.abs(y) > 0.02 * (np.abs(y).max() + 1e-9))[0]
+            if len(nz):
+                y = y[nz[0]:]                                 # on retire le silence du début
+                y = (0.9 * y / (np.abs(y).max() + 1e-9)).astype(np.float32)
+                _CACHE[kind] = (key, y)
+                return y
+        except Exception:
+            pass
+    return builtin_clap(kind)
+
+
+def builtin_clap(kind):
+    """Les 3 claps du logiciel, bien différents pour qu'il les reconnaisse."""
     rng = np.random.default_rng({"clip": 1, "dash": 2, "kunai": 3}[kind])
     n = int(0.18 * SR)
     t = np.arange(n) / SR
@@ -149,8 +202,8 @@ def from_claps(path):
         found.append((i / SR, best, sims[best], centroid))
     if not found:
         raise ValueError("Aucun clap trouvé dans cet audio.")
-    # claps à toi (pas ceux du logiciel) : on classe par hauteur grave / médium / aigu
-    if np.mean([s for _, _, s, _ in found]) < 0.8:
+    # claps inconnus (ni ceux du logiciel, ni les tiens) : on classe par hauteur grave / médium / aigu
+    if np.mean([s for _, _, s, _ in found]) < 0.75:
         cents = np.array([c for *_, c in found])
         lo, hi = np.percentile(cents, 33), np.percentile(cents, 67)
         if hi - lo < 300:                     # un seul type de clap : tout en clips

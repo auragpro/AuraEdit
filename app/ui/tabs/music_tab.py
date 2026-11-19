@@ -158,13 +158,49 @@ class MusicTab(QWidget):
         grid.addWidget(btn("Depuis un audio avec soundkills...", self.from_soundkill_audio,
                            "Ta musique avec tes sound kills déjà faits : le logiciel les retrouve.", True), 1, 1)
         grid.addWidget(btn("Depuis un audio de claps...", self.from_claps,
-                           "Un clap par moment : clap médium = clip, grave = dash, aigu = kunai."), 1, 2)
+                           "Un clap par moment, avec le clap de chaque type (voir « Mes claps » en bas)."), 1, 2)
         grid.addWidget(QLabel("Claps :"), 2, 0, 1, 3)
         grid.addWidget(btn("Créer l'audio de claps...", self.make_claps,
                            "Fabrique automatiquement l'audio de claps à partir des repères."), 3, 0)
         grid.addWidget(btn("Exporter les 3 claps (WAV)...", self.export_claps,
                            "Pour faire ton audio de claps toi-même dans FL Studio."), 3, 1)
         grid.addWidget(btn("Tout effacer", self.clear), 3, 2)
+
+        # --- mes claps : mes propres fichiers audio pour chaque type
+        grid.addWidget(QLabel("Mes claps (tes propres sons) :"), 4, 0, 1, 3)
+        self.clap_labels = {}
+        crow = QHBoxLayout()
+        for kind in mk.TYPES:
+            box = QFrame()
+            box.setStyleSheet(f"QFrame {{ border: 1px solid {mk.COLORS[kind]}; border-radius: 8px; }}"
+                              "QLabel, QPushButton { border: none; }")
+            bl = QVBoxLayout(box)
+            bl.setContentsMargins(10, 6, 10, 6)
+            head = QLabel(f'<span style="color:{mk.COLORS[kind]}">■</span> {mk.LABELS[kind]}')
+            head.setTextFormat(Qt.TextFormat.RichText)
+            name = QLabel()
+            name.setObjectName("hint")
+            self.clap_labels[kind] = name
+            r = QHBoxLayout()
+            b_pick = QPushButton("Choisir...")
+            b_pick.clicked.connect(lambda _=False, k=kind: self.pick_clap(k))
+            b_play = QPushButton("▶")
+            b_play.setFixedWidth(36)
+            b_play.setToolTip("Écouter")
+            b_play.clicked.connect(lambda _=False, k=kind: self.play_clap(k))
+            b_reset = QPushButton("↺")
+            b_reset.setFixedWidth(36)
+            b_reset.setToolTip("Revenir au clap du logiciel")
+            b_reset.clicked.connect(lambda _=False, k=kind: self.reset_clap(k))
+            r.addWidget(b_pick, 1)
+            r.addWidget(b_play)
+            r.addWidget(b_reset)
+            bl.addWidget(head)
+            bl.addWidget(name)
+            bl.addLayout(r)
+            crow.addWidget(box)
+        grid.addLayout(crow, 5, 0, 1, 3)
+        self._clap_names()
 
         card = QFrame()
         card.setObjectName("card")
@@ -321,12 +357,41 @@ class MusicTab(QWidget):
         self._run(job, lambda files: self.status.setText("Audio de claps créé : " + " / ".join(
             Path(x).name for x in files)), "Création de l'audio de claps...")
 
+    def _clap_names(self):
+        custom = mk.custom_claps()
+        for kind, lab in self.clap_labels.items():
+            lab.setText(Path(custom[kind]).name if kind in custom else "clap du logiciel")
+
+    def pick_clap(self, kind):
+        f, _ = QFileDialog.getOpenFileName(self, f"Ton son pour : {mk.LABELS[kind]}", "",
+                                           file_filter("Audio", AUDIO_EXT))
+        if f:
+            mk.set_custom_clap(kind, f)
+            self._clap_names()
+            self.status.setText(f"{mk.LABELS[kind]} : ton son « {Path(f).name} » sera utilisé pour créer "
+                                "et pour reconnaître les claps.")
+
+    def reset_clap(self, kind):
+        mk.set_custom_clap(kind, None)
+        self._clap_names()
+
+    def play_clap(self, kind):
+        import tempfile
+        from PyQt6.QtCore import QUrl
+        from PyQt6.QtGui import QDesktopServices
+        from app.core import audio
+        out = Path(tempfile.gettempdir()) / f"auraedit_clap_{kind}.wav"
+        try:
+            audio.save_wav(out, mk.clap(kind), mk.SR)
+            QDesktopServices.openUrl(QUrl.fromLocalFile(str(out)))
+        except OSError as e:
+            self.status.setText(f"Lecture impossible : {e}")
+
     def export_claps(self):
         folder = QFileDialog.getExistingDirectory(self, "Dossier où mettre les 3 claps")
         if folder:
             files = mk.export_claps(folder)
-            self.status.setText("Claps exportés : " + ", ".join(Path(f).name for f in files) +
-                                " (clip = médium, dash = grave, kunai = aigu).")
+            self.status.setText("Claps exportés : " + ", ".join(Path(f).name for f in files) + ".")
 
     def clear(self):
         if self.project.markers and QMessageBox.question(self, "Effacer", "Effacer tous les moments ?") \
