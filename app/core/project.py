@@ -96,6 +96,7 @@ class Project:
     sons: dict = field(default_factory=default_sons)
     dash: DashSettings = field(default_factory=DashSettings)
     render: dict = field(default_factory=dict)          # dernier rendu : fichier + coupes (pour les shakes)
+    remaps: dict = field(default_factory=dict)          # {clip: {"couteau", "debut", "fin"}} time remap
     path: str | None = None                             # fichier .auraedit (non sauvegardé dedans)
 
     @classmethod
@@ -144,6 +145,7 @@ class Project:
             sons={**default_sons(), **(data.get("sons") if isinstance(data.get("sons"), dict) else {})},
             dash=_hands(DashSettings, data.get("dash")),
             render=data.get("render") if isinstance(data.get("render"), dict) else {},
+            remaps=data.get("remaps") if isinstance(data.get("remaps"), dict) else {},
             path=str(path),
         )
         if not isinstance(p.sons.get("placements"), list):

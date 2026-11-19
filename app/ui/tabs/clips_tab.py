@@ -113,6 +113,9 @@ class ClipsTab(QWidget):
         self.order.reordered.connect(self.sync)
         self.count = QLabel()
         self.count.setObjectName("hint")
+        b_remap = QPushButton("⏱ Time remap...")
+        b_remap.clicked.connect(self.remap_selected)
+        self.order.itemDoubleClicked.connect(lambda it: self.open_remap([it.data(ROLE)]))
         b_up = QPushButton("Monter")
         b_down = QPushButton("Descendre")
         b_remove = QPushButton("Retirer")
@@ -126,7 +129,7 @@ class ClipsTab(QWidget):
         right.addWidget(QLabel("Ordre de l'edit  (glisse pour réordonner)"))
         right.addWidget(self.order, 1)
         row2 = QHBoxLayout()
-        for b in (b_up, b_down, b_remove, b_clear):
+        for b in (b_remap, b_up, b_down, b_remove, b_clear):
             row2.addWidget(b)
         right.addLayout(row2)
         right.addWidget(self.count)
@@ -178,7 +181,8 @@ class ClipsTab(QWidget):
 
     def _order_item(self, path):
         tag = self._label_of(path)
-        item = QListWidgetItem((f"[{tag}]  " if tag else "") + _name(path))
+        mark = "⏱ " if path in self.project.remaps else ""
+        item = QListWidgetItem(mark + (f"[{tag}]  " if tag else "") + _name(path))
         item.setData(ROLE, str(path))
         item.setToolTip(str(path))
         return item
@@ -377,15 +381,46 @@ class ClipsTab(QWidget):
     def add_to_edit(self, paths):
         current = set(self.project.clips)
         added = 0
+        new = []
         for p in paths:
             if p and p not in current:
                 self.order.addItem(self._order_item(p))
                 current.add(p)
                 added += 1
+                new.append(p)
         skipped = len(paths) - added
         if skipped:
             self.status.setText(f"{skipped} clip(s) déjà dans l'edit, ignoré(s).")
         self.sync()
+        if self.mode == "Clips" and new:
+            self.open_remap(new)
+
+    # ------------------------------------------------------- time remap
+    def _knife_of(self, path):
+        for name, clips in self.folders.items():
+            if path in clips:
+                return name
+        return None
+
+    def open_remap(self, paths):
+        """Ouvre la page Time remap pour chaque clip (couteau, keyframes, courbes)."""
+        from ..timeremap_dialog import TimeRemapDialog
+        for p in paths:
+            if p in self.project.kunai.videos or p in self.project.dash.videos:
+                continue
+            dlg = TimeRemapDialog(self.project, p, self._knife_of(p), list(self.folders), self)
+            dlg.exec()
+            self.refresh_left()
+            self.changed.emit()
+            if dlg.skip_all:
+                break
+
+    def remap_selected(self):
+        paths = [it.data(ROLE) for it in self.order.selectedItems()]
+        if not paths:
+            self.status.setText("Sélectionne un clip dans l'ordre de l'edit (à droite).")
+            return
+        self.open_remap(paths)
 
     def move(self, step):
         rows = sorted(self.order.row(it) for it in self.order.selectedItems())

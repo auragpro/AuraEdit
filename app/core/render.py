@@ -72,6 +72,22 @@ def render(project, output, progress=None, is_cancelled=None):
             if progress:
                 progress(i / steps, f"Préparation {i + 1}/{len(segs)} : {Path(path).name}")
             part = tmp / f"{i:04d}.mp4"
+            remap = project.remaps.get(path) if kind == "clip" else None
+            if remap:
+                from . import timeremap
+                try:
+                    timeremap.render(path, float(remap["debut"]), float(remap["fin"]), timeremap.load(), part,
+                                     is_cancelled)
+                except InterruptedError:
+                    raise Cancelled()
+                except (ValueError, KeyError, OSError) as e:
+                    raise RenderError(f"Time remap impossible pour {Path(path).name} :\n{e}")
+                d = duration(part)
+                info.append({"type": kind, "fichier": str(path), "debut": round(t, 3), "duree": round(d, 3),
+                             "time_remap": True})
+                parts.append(part)
+                t += d
+                continue
             _run([ff, "-y", "-hide_banner", "-i", str(path), "-an", "-vf", vf, "-c:v", "libx264",
                   "-preset", "veryfast", "-crf", "18", str(part)], is_cancelled)
             d = duration(part)
