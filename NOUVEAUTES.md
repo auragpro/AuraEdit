@@ -1,4 +1,4 @@
-## Nouveautés de la version 0.4.1
+## Nouveautés de la version 0.4.2
 
-- **Nouvel onglet « Montage »** : Intro, Musique, Clips, Kunai et Dash sont maintenant réunis sur une seule page, sous forme de **gros carrés**. Chaque carré montre où tu en es (✓ / ✗). Clique sur un carré pour le remplir, puis « ← Retour au Montage ».
-- Un carré **« Générer l'edit »** lance directement le rendu MP4.
+- **Mises à jour beaucoup plus rapides** : à partir de la prochaine, AuraEdit ne télécharge plus tout le logiciel (80 Mo) mais seulement le code qui a changé (quelques centaines de Ko). Le gros téléchargement ne revient que si une nouvelle bibliothèque est ajoutée.
+- Cette mise à jour-ci est la dernière à télécharger le logiciel complet.

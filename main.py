@@ -1,63 +1,72 @@
-"""Point d'entrée d'AuraEdit.  Lancer :  python main.py"""
+"""Point d'entrée d'AuraEdit.  Lancer :  python main.py
+
+Dans l'exe, les mises à jour « légères » ne remplacent pas l'exe : elles déposent seulement
+le nouveau code dans %APPDATA%/AuraEdit/code/<version>/. Ce lanceur l'utilise s'il est plus
+récent que le code fourni dans l'exe et compatible (même BASE), sinon il garde le code de l'exe.
+"""
+import os
+import re
+import shutil
 import sys
-import traceback
-from datetime import datetime
-
-from PyQt6.QtGui import QIcon
-from PyQt6.QtWidgets import QApplication, QMessageBox
-
-from app.core import project, updater
-from app.ui.main_window import MainWindow
-from app.ui.style import STYLESHEET, asset
-from version import APP_NAME, __version__
+from pathlib import Path
 
 
-def install_error_handler():
-    """Au lieu de fermer brutalement, une erreur imprévue est affichée et notée dans un fichier."""
-    def handler(exc_type, exc, tb):
-        text = "".join(traceback.format_exception(exc_type, exc, tb))
-        log = None
-        try:
-            log = project.config_dir() / "erreurs.log"
-            with open(log, "a", encoding="utf-8") as f:
-                f.write(f"\n=== {datetime.now():%Y-%m-%d %H:%M:%S} — v{__version__} ===\n{text}")
-        except OSError:
-            pass
-        if QApplication.instance() is not None:
-            QMessageBox.critical(None, "Erreur inattendue",
-                                 f"Une erreur est survenue :\n{exc}\n\n"
-                                 f"Détails enregistrés dans :\n{log}")
-        else:
-            sys.__excepthook__(exc_type, exc, tb)
-
-    sys.excepthook = handler
-
-
-def set_windows_app_id():
-    """Pour que Windows affiche le logo d'AuraEdit dans la barre des tâches."""
+def _code_root():
     if sys.platform == "win32":
+        base = Path(os.environ.get("APPDATA") or Path.home() / "AppData" / "Roaming")
+    else:
+        base = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config")
+    return base / "AuraEdit" / "code"
+
+
+def _ver(text):
+    return tuple(int(n) for n in re.findall(r"\d+", text)[:3])
+
+
+def _purge():
+    for m in list(sys.modules):
+        if m == "version" or m == "app" or m.startswith("app."):
+            del sys.modules[m]
+
+
+def _downloaded_code():
+    """Dossier du code téléchargé à utiliser, ou None."""
+    if not getattr(sys, "frozen", False):
+        return None
+    try:
+        import version as bundled
+        root = _code_root()
+        folder = root / (root / "current.txt").read_text(encoding="utf-8").strip()
+        txt = (folder / "version.py").read_text(encoding="utf-8")
+        base = int(re.search(r"BASE = (\d+)", txt).group(1))
+        ver = re.search(r'__version__ = "([^"]+)"', txt).group(1)
+        if base != getattr(bundled, "BASE", None) or _ver(ver) <= _ver(bundled.__version__):
+            return None
+        return folder
+    except Exception:
+        return None
+
+
+def run():
+    folder = _downloaded_code()
+    if folder is not None:
+        _purge()
+        sys.path.insert(0, str(folder))
         try:
-            import ctypes
-            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("auragpro.AuraEdit")
-        except Exception:
-            pass
-
-
-def main():
-    updater.cleanup_leftovers()          # supprime l'ancienne version après une MAJ
-    set_windows_app_id()
-    app = QApplication(sys.argv)
-    app.setWindowIcon(QIcon(asset("logo.png")))
-    app.setApplicationName(APP_NAME)
-    app.setApplicationVersion(__version__)
-    app.setStyleSheet(STYLESHEET)
-    install_error_handler()
-
-    window = MainWindow()
-    window.show()
-    window.start()                       # vérifie les MAJ puis affiche la page de démarrage
-    return app.exec()
+            from app.launcher import main
+        except Exception:                     # code téléchargé abîmé : retour au code de l'exe
+            sys.path.remove(str(folder))
+            _purge()
+            try:
+                (_code_root() / "current.txt").unlink()
+                shutil.rmtree(folder, ignore_errors=True)
+            except OSError:
+                pass
+            from app.launcher import main
+    else:
+        from app.launcher import main
+    return main()
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(run())

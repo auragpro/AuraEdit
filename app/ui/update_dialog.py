@@ -73,7 +73,8 @@ class UpdateDialog(QDialog):
         self.progress.setVisible(True)
         self.progress.setRange(0, 0)            # animation « en cours » tant qu'on ne connaît pas la taille
         self.status.setText("Téléchargement...")
-        self.thread = DownloadThread(self.info, updater.download_path(), self)
+        dest = updater.code_download_path() if self.info.kind == "code" else updater.download_path()
+        self.thread = DownloadThread(self.info, dest, self)
         self.thread.progress.connect(self.on_progress)
         self.thread.done.connect(self.on_done)
         self.thread.failed.connect(self.on_failed)
@@ -90,7 +91,10 @@ class UpdateDialog(QDialog):
     def on_done(self, path):
         self.status.setText("Installation...")
         try:
-            updater.install(path)
+            if self.info.kind == "code":
+                updater.install_code(path, self.info.version)
+            else:
+                updater.install(path)
             updater.restart()
         except updater.UpdateError as e:
             self.on_failed(str(e))

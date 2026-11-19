@@ -19,7 +19,7 @@ import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
-from version import APP_NAME, ASSET_NAME, GITHUB_REPO, __version__
+from version import APP_NAME, ASSET_NAME, CODE_ASSET, GITHUB_REPO, __version__
 
 # Permet de tester avec un faux serveur (variable d'environnement)
 API_URL = os.environ.get("AURAEDIT_UPDATE_URL",
@@ -39,6 +39,7 @@ class UpdateInfo:
     size: int             # taille attendue en octets
     sha256: str | None    # empreinte fournie par GitHub, si disponible
     page_url: str         # page web de la release
+    kind: str = "exe"     # "code" = MAJ légère (seulement le code), "exe" = tout le logiciel
 
 
 # ------------------------------------------------------------ versions ----
@@ -97,7 +98,12 @@ def check_for_update(current=__version__):
     tag = data.get("tag_name") or ""
     if not is_newer(tag, current):
         return None
-    asset = next((a for a in data.get("assets", []) if a.get("name") == ASSET_NAME), None)
+    assets = data.get("assets", [])
+    asset = next((a for a in assets if a.get("name") == ASSET_NAME), None)
+    code = next((a for a in assets if a.get("name") == CODE_ASSET), None)
+    kind = "exe"
+    if code is not None and is_frozen():
+        asset, kind = code, "code"          # même base : pas besoin de retélécharger l'exe
     if asset is None:
         return None          # release publiée sans l'exe : on ignore
     digest = asset.get("digest") or ""
@@ -108,6 +114,7 @@ def check_for_update(current=__version__):
         size=int(asset.get("size") or 0),
         sha256=digest.split(":", 1)[1].lower() if digest.startswith("sha256:") else None,
         page_url=data.get("html_url") or f"https://github.com/{GITHUB_REPO}/releases",
+        kind=kind,
     )
 
 
@@ -213,3 +220,45 @@ def cleanup_leftovers(exe=None):
             exe.with_name(exe.name + suffix).unlink(missing_ok=True)
         except OSError:
             pass
+
+
+# ------------------------------------------------- MAJ légère (code seul) ----
+
+def code_root():
+    from app.core.project import config_dir
+    d = config_dir() / "code"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def code_download_path():
+    return code_root() / "maj.zip"
+
+
+def install_code(zip_path, version):
+    """Décompresse le nouveau code dans code/<version>/ et le choisit pour le prochain lancement."""
+    import shutil
+    import zipfile
+    root = code_root()
+    target = root / version
+    tmp = root / (version + ".tmp")
+    shutil.rmtree(tmp, ignore_errors=True)
+    try:
+        with zipfile.ZipFile(zip_path) as z:
+            for name in z.namelist():
+                if name.startswith("/") or ".." in Path(name).parts:
+                    raise UpdateError("Mise à jour invalide.")
+            z.extractall(tmp)
+        if not (tmp / "version.py").is_file() or not (tmp / "app").is_dir():
+            raise UpdateError("Mise à jour incomplète.")
+        shutil.rmtree(target, ignore_errors=True)
+        os.replace(tmp, target)
+        (root / "current.txt").write_text(version, encoding="utf-8")
+    except (OSError, zipfile.BadZipFile) as e:
+        shutil.rmtree(tmp, ignore_errors=True)
+        raise UpdateError(f"Installation impossible : {e}") from e
+    finally:
+        Path(zip_path).unlink(missing_ok=True)
+    for old in root.iterdir():                 # garde seulement la version installée
+        if old.is_dir() and old.name != version:
+            shutil.rmtree(old, ignore_errors=True)
