@@ -89,6 +89,11 @@ class HandsTab(QWidget):
             b_remove = QPushButton("Retirer")
             b_add.clicked.connect(lambda _=False, sd=side: self.add_videos(sd))
             b_remove.clicked.connect(lambda _=False, sd=side: self.remove_selected(sd))
+            if self.ATTR == "kunai":
+                b_remap = QPushButton("⏱ Time remap...")
+                b_remap.setToolTip("Régler le time remap des kunais sélectionnés (double-clic aussi).")
+                b_remap.clicked.connect(lambda _=False, sd=side: self.remap_selected(sd))
+                lst.itemDoubleClicked.connect(lambda it: self.open_remap([it.data(ROLE)]))
             count = QLabel()
             count.setObjectName("hint")
             title = QLabel(("✋  " if side == "gauche" else "🤚  ") + label)
@@ -102,6 +107,8 @@ class HandsTab(QWidget):
             row = QHBoxLayout()
             row.addWidget(b_add)
             row.addWidget(b_remove)
+            if self.ATTR == "kunai":
+                row.addWidget(b_remap)
             cl.addLayout(row)
             cl.addWidget(count)
             cols.addWidget(card, 1)
@@ -122,10 +129,10 @@ class HandsTab(QWidget):
     def settings(self):
         return getattr(self.project, self.ATTR)
 
-    @staticmethod
-    def _item(path):
+    def _item(self, path):
         p = Path(path)
-        item = QListWidgetItem(p.name if p.is_file() else f"⚠ {p.name} (introuvable)")
+        mark = "⏱ " if self.ATTR == "kunai" and str(path) in self.project.remaps else ""
+        item = QListWidgetItem(mark + (p.name if p.is_file() else f"⚠ {p.name} (introuvable)"))
         item.setData(ROLE, str(path))
         item.setToolTip(str(path))
         return item
@@ -152,6 +159,42 @@ class HandsTab(QWidget):
         for it in lst.selectedItems():
             lst.takeItem(lst.row(it))
         self._sync()
+
+    # ------------------------------------------------------- time remap kunai
+    def remap_selected(self, side):
+        paths = [it.data(ROLE) for it in self.lists[side].selectedItems()]
+        if not paths:
+            paths = [self.lists[side].item(i).data(ROLE) for i in range(self.lists[side].count())]
+        self.open_remap(paths)
+
+    def open_remap(self, paths):
+        from ..timeremap_dialog import TimeRemapDialog
+        for p in paths:
+            dlg = TimeRemapDialog(self.project, p, None, (), self, mode="kunai")
+            dlg.exec()
+            if dlg.skip_all:
+                break
+        self._relabel()
+        self.changed.emit()
+
+    def _relabel(self):
+        for lst in self.lists.values():
+            for i in range(lst.count()):
+                it = lst.item(i)
+                it.setText(self._item(it.data(ROLE)).text())
+
+    def showEvent(self, e):
+        super().showEvent(e)
+        if self.ATTR == "kunai":
+            try:
+                from app.core import timeremap as tr
+                saved = tr.clip_remaps()
+                for v in self.settings.videos:
+                    if v in saved and v not in self.project.remaps:
+                        self.project.remaps[v] = saved[v]
+            except Exception:
+                pass
+            self._relabel()
 
     def _sync(self):
         for side, lst in self.lists.items():

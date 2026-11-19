@@ -13,9 +13,9 @@ from version import __version__
 from .style import RED, asset
 
 WHATS_NEW = [
-    "Qualité d'export au choix : 720p, 1080p, 1440p ou 4K",
-    "Images/s (24 à 60) et débit (Mb/s) réglables",
-    "Plus de perte de qualité pendant le rendu"]
+    "Nouveau : time remap sur les kunais",
+    "Bouton « ⏱ Time remap... » dans l'onglet Kunai (ou double-clic)",
+    "Réglages des kunais gardés à part de ceux des couteaux"]
 
 
 def ago(ts):

@@ -33,7 +33,9 @@ DEFAULTS = {
     "blending_mode": "motion", # "motion" (Pixel Motion), "mix" (Frame Mix) ou "off"
     "mode_v2": False,          # passage automatique au Pixel Motion (une seule fois)
     "couteaux": {},            # {nom: {"image": chemin, "duree": secondes entre début et fin}}
+    "kunai_reglages": {},      # réglages propres aux kunais (courbes, durées, blending, durée apprise)
 }
+KUNAI_KEYS = ("courbe1", "courbe2", "duree_ralenti", "frames_retour", "blending", "blending_mode")
 
 
 # ------------------------------------------------------------- réglages ----
@@ -57,6 +59,28 @@ def load():
         cfg["blending"] = True
         cfg["mode_v2"] = True
     return cfg
+
+
+def cfg_for(data, cfg=None):
+    """Réglages à utiliser pour un time remap : ceux des kunais si c'est un kunai."""
+    base = cfg or load()
+    if isinstance(data, dict) and data.get("type") == "kunai":
+        merged = dict(base)
+        k = base.get("kunai_reglages") or {}
+        merged.update({key: k[key] for key in KUNAI_KEYS if key in k})
+        return merged
+    return base
+
+
+def save_kunai(merged):
+    """Garde les réglages kunai (pris dans un cfg fusionné) sans toucher à ceux des clips."""
+    base = load()
+    k = dict(base.get("kunai_reglages") or {})
+    k.update({key: merged[key] for key in KUNAI_KEYS if key in merged})
+    if merged.get("duree_kunai"):
+        k["duree"] = merged["duree_kunai"]
+    base["kunai_reglages"] = k
+    save(base)
 
 
 def save(cfg):

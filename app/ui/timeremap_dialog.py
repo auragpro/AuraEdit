@@ -166,17 +166,18 @@ class FramePicker(QFrame):
 class TimeRemapDialog(QDialog):
     """Renvoie Accepted (time remap enregistré) ou Rejected (pas de time remap pour ce clip)."""
 
-    def __init__(self, project, path, knife=None, knives=(), parent=None):
+    def __init__(self, project, path, knife=None, knives=(), parent=None, mode="clip"):
         super().__init__(parent)
-        self.setWindowTitle("Time remap")
+        self.kunai = mode == "kunai"
+        self.setWindowTitle("Time remap — kunai" if self.kunai else "Time remap")
         self.setMinimumWidth(900)
         self.project, self.path = project, path
-        self.cfg = tr.load()
+        self.cfg = tr.cfg_for({"type": "kunai"}) if self.kunai else tr.load()
         self.skip_all = False
         self.thread = None
         old = tr.clip_remaps().get(path) or project.remaps.get(path) or {}
 
-        title = QLabel(f"Time remap — {Path(path).name}")
+        title = QLabel(f"Time remap {'kunai ' if self.kunai else ''}— {Path(path).name}")
         title.setObjectName("h1")
 
         # --- couteau
@@ -205,8 +206,12 @@ class TimeRemapDialog(QDialog):
         krow.addWidget(self.knife_img)
 
         # --- keyframes
-        self.k1 = FramePicker("Keyframe 1 — début : plus de mains à l'écran", path)
-        self.k2 = FramePicker("Keyframe 2 — fin : couteau sorti (jusqu'où va le time remap)", path)
+        if self.kunai:
+            self.k1 = FramePicker("Keyframe 1 — début : le kunai part (moment du kill)", path)
+            self.k2 = FramePicker("Keyframe 2 — fin : jusqu'où va le time remap", path)
+        else:
+            self.k1 = FramePicker("Keyframe 1 — début : plus de mains à l'écran", path)
+            self.k2 = FramePicker("Keyframe 2 — fin : couteau sorti (jusqu'où va le time remap)", path)
         frames = QHBoxLayout()
         frames.addWidget(self.k1)
         frames.addWidget(self.k2)
@@ -280,6 +285,14 @@ class TimeRemapDialog(QDialog):
 
         lay = QVBoxLayout(self)
         lay.addWidget(title)
+        if self.kunai:
+            for w in (self.knife, b_img, self.knife_info, self.knife_img):
+                w.setVisible(False)
+            info = QLabel("Réglages propres aux kunais : les courbes et durées ci-dessous sont gardées à part "
+                          "de celles des clips au couteau. Je retiens la durée que tu valides pour les prochains kunais.")
+            info.setObjectName("hint")
+            info.setWordWrap(True)
+            lay.addWidget(info)
         lay.addLayout(krow)
         lay.addLayout(frames)
         lay.addLayout(killrow)
@@ -295,9 +308,14 @@ class TimeRemapDialog(QDialog):
 
     # ---------------------------------------------------------- couteau
     def _knife_data(self):
+        if self.kunai:
+            d = (self.cfg.get("kunai_reglages") or {}).get("duree")
+            return {"duree": d} if d else {}
         return self.cfg["couteaux"].get(self.knife.currentText().strip(), {})
 
     def _knife_changed(self, *_):
+        if self.kunai:
+            return
         k = self._knife_data()
         img = k.get("image")
         pix = QPixmap(img) if img and Path(img).is_file() else QPixmap()
@@ -345,7 +363,8 @@ class TimeRemapDialog(QDialog):
         start, end = a.keyframes(-1)
         self._ready(start, end, a.length)
         if a.kills:
-            self.status.setText(f"{len(a.kills)} kill(s) trouvé(s). Keyframe 1 = 1re frame sans le couteau "
+            what = "le kunai part" if self.kunai else "1re frame sans le couteau"
+            self.status.setText(f"{len(a.kills)} kill(s) trouvé(s). Keyframe 1 = {what} "
                                 f"après le kill à {a.kills[-1] / tr.FPS:.2f} s. Si c'est mauvais, déplace les "
                                 "curseurs ou choisis un autre kill.")
         else:
@@ -416,8 +435,16 @@ class TimeRemapDialog(QDialog):
         if end <= start:
             self.status.setText("La keyframe 2 (couteau sorti) doit être après la keyframe 1.")
             return
-        name = self.knife.currentText().strip() or "Couteau"
         self._save_settings()
+        if self.kunai:
+            self.cfg["duree_kunai"] = round(end - start, 4)
+            tr.save_kunai(self.cfg)
+            data = {"type": "kunai", "debut": round(start, 4), "fin": round(end, 4)}
+            self.project.remaps[self.path] = data
+            tr.save_clip_remap(self.path, data)
+            self.accept()
+            return
+        name = self.knife.currentText().strip() or "Couteau"
         k = self.cfg["couteaux"].setdefault(name, {})
         k["duree"] = round(end - start, 4)
         if not (k.get("image") and Path(k["image"]).is_file()):
@@ -436,7 +463,10 @@ class TimeRemapDialog(QDialog):
 
     def done(self, r):
         self._save_settings()
-        tr.save(self.cfg)
+        if self.kunai:
+            tr.save_kunai(self.cfg)
+        else:
+            tr.save(self.cfg)
         if self.thread is not None and self.thread.isRunning():
             self.thread.wait(10000)
         if self.preview_thread is not None and self.preview_thread.isRunning():

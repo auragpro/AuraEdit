@@ -77,7 +77,7 @@ def render(project, output, progress=None, is_cancelled=None, export=None):
                 from . import timeremap
                 try:
                     name = Path(path).name
-                    timeremap.render(path, float(remap["debut"]), float(remap["fin"]), timeremap.load(), part,
+                    timeremap.render(path, float(remap["debut"]), float(remap["fin"]), timeremap.cfg_for(remap), part,
                                      is_cancelled,
                                      (lambda f, txt, i=i, name=name: progress((i + f) / steps,
                                                                               f"Clip {i + 1}/{len(segs)} — {txt} ({name})"))

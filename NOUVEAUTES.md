@@ -1,10 +1,12 @@
-## Nouveautés de la version 0.7.2
+## Nouveautés de la version 0.7.3
 
-- **Fini la perte de qualité** : les étapes du rendu (préparation des clips, time remap, shakes) gardent maintenant une qualité quasi parfaite. La vidéo n'est compressée qu'**une seule fois**, à la fin, avec tes réglages.
-- **Nouveau : « Qualité de l'export »** dans l'Accueil, au-dessus du bouton « Générer l'edit » :
-  - **Résolution** : 720p, 1080p, 1440p ou 4K ;
-  - **Images/s** : 24, 25, 30, 50 ou 60 ;
-  - **Débit** : de 2 à 300 Mb/s (40–80 Mb/s = très bonne qualité en 1080p 60 i/s, 100 Mb/s et plus en 4K) ;
-  - **Encodage** : Rapide, Équilibré ou Meilleure qualité (plus lent).
-- Tes réglages sont gardés pour tous tes projets.
-- Correction : l'export du mix dans **Sons IA** remarche.
+- **Nouveau : le time remap marche sur les kunais.**
+  - Dans **Montage → Kunai**, sélectionne une ou plusieurs vidéos et clique **« ⏱ Time remap... »** (ou double-clique une vidéo).
+  - Sans sélection, le bouton enchaîne toutes les vidéos de la main.
+  - Tu peux aussi le lancer depuis l'ordre de l'edit dans **Clips** : les kunais ne sont plus ignorés.
+- Même page que pour les clips :
+  - détection du kill ;
+  - **Keyframe 1** = le kunai part, **Keyframe 2** = fin du time remap ;
+  - courbes, durée du ralenti, retour, frame blending (Pixel Motion) et **▶ Aperçu**.
+- Les **réglages des kunais sont séparés** de ceux des couteaux : tu peux avoir des courbes et des durées différentes. L'app retient la durée validée et la propose pour les kunais suivants.
+- Les kunais réglés ont un **⏱** devant leur nom, et le time remap est appliqué quand tu génères l'edit.

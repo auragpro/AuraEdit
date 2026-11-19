@@ -5,5 +5,5 @@ from .hands_tab import HandsTab
 class KunaiTab(HandsTab):
     ATTR = "kunai"
     TITLE = "Kunai"
-    HINT = "Mets tes vidéos de kunais dans chaque main : à gauche et/ou à droite, ce que tu as."
+    HINT = "Mets tes vidéos de kunais dans chaque main, puis règle leur time remap avec « ⏱ Time remap... » (ou double-clic)."
     ENABLE = "Activer les kunais"
