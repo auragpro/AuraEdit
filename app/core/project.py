@@ -46,6 +46,12 @@ class KunaiSettings:
     videos: list[str] = field(default_factory=list)   # vidéos de kills avec Jett
 
 
+@dataclass
+class DashSettings:
+    enabled: bool = True
+    videos: list[str] = field(default_factory=list)   # vidéos de dash (Jett)
+
+
 def default_sons():
     """Réglages de l'onglet Sons IA."""
     return {"dossier": None, "paroles": None, "mots_cles": "", "densite": 0.5, "creativite": 0.3,
@@ -62,6 +68,8 @@ class Project:
     clips: list[str] = field(default_factory=list)     # dans l'ordre de l'edit
     kunai: KunaiSettings = field(default_factory=KunaiSettings)
     sons: dict = field(default_factory=default_sons)
+    dash: DashSettings = field(default_factory=DashSettings)
+    render: dict = field(default_factory=dict)          # dernier rendu : fichier + coupes (pour les shakes)
     path: str | None = None                             # fichier .auraedit (non sauvegardé dedans)
 
     @classmethod
@@ -110,6 +118,9 @@ class Project:
                                 position=pos if pos in KUNAI_POSITIONS else "les deux",
                                 videos=[str(v) for v in kunai.get("videos") or []]),
             sons={**default_sons(), **(data.get("sons") if isinstance(data.get("sons"), dict) else {})},
+            dash=DashSettings(enabled=bool((data.get("dash") or {}).get("enabled", True)),
+                              videos=[str(v) for v in (data.get("dash") or {}).get("videos") or []]),
+            render=data.get("render") if isinstance(data.get("render"), dict) else {},
             path=str(path),
         )
         if not isinstance(p.sons.get("placements"), list):
@@ -120,7 +131,8 @@ class Project:
     # -- état
     def missing_files(self):
         """Fichiers du projet qui n'existent plus sur le PC (déplacés, supprimés...)."""
-        files = [self.intro, self.outro, self.music, *self.clips, *self.kunai.videos, self.sons.get("paroles")]
+        files = [self.intro, self.outro, self.music, *self.clips, *self.kunai.videos, *self.dash.videos,
+                 self.sons.get("paroles")]
         return [f for f in files if f and not Path(f).is_file()]
 
     def checklist(self):
@@ -129,7 +141,8 @@ class Project:
             ("Intro", bool(self.intro)),
             ("Musique", bool(self.music)),
             (f"Clips ({len(self.clips)})", bool(self.clips)),
-            ("Kunais Jett", (not self.kunai.enabled) or bool(self.kunai.videos)),
+            ("Kunai", (not self.kunai.enabled) or bool(self.kunai.videos)),
+            ("Dash", (not self.dash.enabled) or bool(self.dash.videos)),
             (f"Sons IA ({len(self.sons.get('placements', []))})", bool(self.sons.get("placements"))),
         ]
 
@@ -181,6 +194,30 @@ def remove_recent(path):
     items = [p for p in load_recents() if p != path]
     try:
         _recents_file().write_text(json.dumps(items, ensure_ascii=False, indent=1), encoding="utf-8")
+    except OSError:
+        pass
+
+
+# ------------------------------------------- dossiers de clips (couteaux) ----
+
+def _folders_file():
+    return config_dir() / "dossiers_clips.json"
+
+
+def load_clip_folders():
+    """{nom du dossier (couteau): [chemins des clips]} — partagé entre tous les projets."""
+    try:
+        d = json.loads(_folders_file().read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    if not isinstance(d, dict):
+        return {}
+    return {str(k): [str(v) for v in vs if isinstance(v, str)] for k, vs in d.items() if isinstance(vs, list)}
+
+
+def save_clip_folders(folders):
+    try:
+        _folders_file().write_text(json.dumps(folders, ensure_ascii=False, indent=1), encoding="utf-8")
     except OSError:
         pass
 

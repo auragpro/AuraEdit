@@ -13,9 +13,9 @@ from version import __version__
 from .style import RED, asset
 
 WHATS_NEW = [
-    "Nouveau : donne ton edit, un son de kill est placé à chaque transition",
-    "L'IA apprend ton rythme et ton calage depuis tes edits",
-    "Tes sous-dossiers de sons deviennent des catégories",
+    "« Générer l'edit » fait maintenant le rendu MP4 de ton montage",
+    "Dossiers de clips par couteau + sélecteur Clips / Kunai / Dash",
+    "Catégorie Montage et nouvel onglet Dash",
 ]
 
 
@@ -103,7 +103,7 @@ class StartPage(QWidget):
         btn_open.setObjectName("link")
         btn_open.clicked.connect(self._browse)
 
-        steps = QLabel("Intro  →  Musique  →  Clips  →  Sons IA  →  Kunais Jett")
+        steps = QLabel("Intro  →  Musique  →  Clips  →  Kunai  →  Dash  →  Sons IA")
         steps.setObjectName("hint")
 
         left = QVBoxLayout()

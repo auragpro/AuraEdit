@@ -152,3 +152,32 @@ class CutsThread(QThread):
             self.done.emit(cuts, music_analysis.analyze(y))
         except Exception as e:
             self.failed.emit(str(e))
+
+
+class RenderThread(QThread):
+    """Rendu de l'edit en MP4."""
+    progress = pyqtSignal(float, str)
+    done = pyqtSignal(dict)
+    failed = pyqtSignal(str)
+
+    def __init__(self, project, output, parent=None):
+        super().__init__(parent)
+        self.project = project
+        self.output = output
+        self._cancel = False
+
+    def cancel(self):
+        self._cancel = True
+
+    def run(self):
+        from app.core import render
+        try:
+            res = render.render(self.project, self.output, progress=self.progress.emit,
+                                is_cancelled=lambda: self._cancel)
+        except render.Cancelled:
+            self.failed.emit("Rendu annulé.")
+            return
+        except Exception as e:
+            self.failed.emit(str(e) or e.__class__.__name__)
+            return
+        self.done.emit(res)

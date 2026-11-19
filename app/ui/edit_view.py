@@ -1,18 +1,23 @@
 """Mode édition : barre latérale (onglets) à gauche + contenu de l'onglet à droite."""
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtWidgets import (QHBoxLayout, QLabel, QListWidget, QMessageBox, QPushButton,
-                             QStackedWidget, QVBoxLayout, QWidget)
+from PyQt6.QtWidgets import (QHBoxLayout, QLabel, QListWidget, QListWidgetItem, QMessageBox,
+                             QPushButton, QStackedWidget, QVBoxLayout, QWidget)
 
 from .style import PANEL
 from .tabs.clips_tab import ClipsTab
+from .tabs.dash_tab import DashTab
 from .tabs.home_tab import HomeTab
 from .tabs.intro_tab import IntroTab
 from .tabs.kunai_tab import KunaiTab
 from .tabs.music_tab import MusicTab
 from .tabs.sounds_tab import SoundsTab
 
-TABS = [("Accueil", HomeTab), ("Intro", IntroTab), ("Musique", MusicTab),
-        ("Clips", ClipsTab), ("Sons IA", SoundsTab), ("Kunais Jett", KunaiTab)]
+# (nom, classe, catégorie) — les onglets d'une même catégorie sont regroupés sous un titre
+TABS = [("Accueil", HomeTab, None),
+        ("Intro", IntroTab, "MONTAGE"), ("Musique", MusicTab, "MONTAGE"), ("Clips", ClipsTab, "MONTAGE"),
+        ("Kunai", KunaiTab, "MONTAGE"), ("Dash", DashTab, "MONTAGE"),
+        ("Sons IA", SoundsTab, "AUDIO")]
+ROLE = Qt.ItemDataRole.UserRole
 
 
 class EditView(QWidget):
@@ -29,14 +34,30 @@ class EditView(QWidget):
         self.sidebar.setObjectName("sidebar")
         self.pages = QStackedWidget()
         self.tabs = {}
-        for name, cls in TABS:
+        self.rows = {}
+        group = None
+        for name, cls, cat in TABS:
+            if cat and cat != group:
+                head = QListWidgetItem(cat)
+                head.setFlags(Qt.ItemFlag.NoItemFlags)       # titre : pas cliquable
+                f = head.font()
+                f.setPointSize(8)
+                f.setBold(True)
+                head.setFont(f)
+                self.sidebar.addItem(head)
+            group = cat
             page = cls(project)
             page.changed.connect(self.on_changed)
             self.tabs[name] = page
-            self.pages.addWidget(page)
-            self.sidebar.addItem(name)
+            index = self.pages.addWidget(page)
+            item = QListWidgetItem(("    " if cat else "") + name)
+            item.setData(ROLE, index)
+            self.sidebar.addItem(item)
+            self.rows[name] = self.sidebar.count() - 1
         self.tabs["Accueil"].go_to.connect(self.select)
-        self.sidebar.currentRowChanged.connect(self.pages.setCurrentIndex)
+        self.tabs["Kunai"].changed.connect(self.tabs["Clips"].refresh_left)
+        self.tabs["Dash"].changed.connect(self.tabs["Clips"].refresh_left)
+        self.sidebar.currentRowChanged.connect(self._row)
 
         self.title = QLabel(project.name)
         self.title.setWordWrap(True)
@@ -63,10 +84,14 @@ class EditView(QWidget):
         lay.addWidget(self.pages, 1)
         self.sidebar.setCurrentRow(0)
 
+    def _row(self, row):
+        item = self.sidebar.item(row)
+        if item is not None and item.data(ROLE) is not None:
+            self.pages.setCurrentIndex(item.data(ROLE))
+
     def select(self, name):
-        names = [n for n, _ in TABS]
-        if name in names:
-            self.sidebar.setCurrentRow(names.index(name))
+        if name in self.rows:
+            self.sidebar.setCurrentRow(self.rows[name])
 
     def on_changed(self):
         """Une modification dans un onglet : sauvegarde auto + mise à jour du résumé."""

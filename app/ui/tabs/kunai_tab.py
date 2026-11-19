@@ -122,7 +122,7 @@ class KunaiTab(QWidget):
 
         lay = QVBoxLayout(self)
         lay.setContentsMargins(32, 28, 32, 28)
-        lay.addWidget(page_header("Kunais Jett", "Ajoute tes vidéos de kills avec Jett : elles seront "
+        lay.addWidget(page_header("Kunai", "Ajoute tes vidéos de kills avec Jett : elles seront "
                                                  "incrustées sur le côté gauche, droit, ou les deux."))
         lay.addLayout(cols, 1)
         self._refresh()
