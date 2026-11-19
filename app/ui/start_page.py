@@ -13,9 +13,9 @@ from version import __version__
 from .style import RED, asset
 
 WHATS_NEW = [
+    "Flickaway plus fluides : flou de mouvement sur les passages rapides",
+    "Pixel Motion plus fin (≈240 i/s) pour un ralenti sans à-coups",
     "Mes claps : choisis tes propres sons pour clip, dash et kunai",
-    "Frise de la musique : moments des clips, dash et kunais",
-    "Audio de claps créé automatiquement depuis tes sound kills",
 ]
 
 

@@ -1,6 +1,6 @@
-## Nouveautés de la version 0.6.1
+## Nouveautés de la version 0.6.2
 
-- **Tes propres claps** : dans Musique, la zone **« Mes claps »** te laisse choisir **ton fichier audio** pour chaque type : Clip (kill), Dash et Kunai.
-- Tes sons sont utilisés pour **créer l'audio de claps** ET pour **reconnaître les claps** quand tu réimportes ton audio : le logiciel compare chaque clap à tes 3 sons.
-- **▶** pour écouter le clap choisi, **↺** pour revenir au clap du logiciel.
-- « Exporter les 3 claps (WAV) » exporte maintenant les claps que tu as choisis.
+- **Flickaway / cuts beaucoup plus fluides** : nouveau **flou de mouvement** sur les passages rapides (le flick et le retour). Chaque image mélange plusieurs instants du clip comme une vraie caméra, plus de saccades.
+- Réglage **« Flou de mouvement »** dans la fenêtre du time remap : Aucun, Normal (180°) ou Fort (360°, très lisse).
+- **Pixel Motion plus fin** : 4 fois plus d'images calculées (environ 240 i/s), donc un ralenti sans à-coups.
+- **Encodage de meilleure qualité** des clips time-remappés (moins de blocs dans les mouvements rapides).

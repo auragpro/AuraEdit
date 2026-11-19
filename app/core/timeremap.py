@@ -31,6 +31,7 @@ DEFAULTS = {
     "frames_retour": 6,        # frames entre la keyframe 2 et la 3 (le reverse)
     "blending": True,
     "blending_mode": "mix",    # "mix" (Frame Mix), "motion" (Pixel Motion) ou "off"
+    "flou": "normal",          # flou de mouvement sur les passages rapides : "off", "normal" (180°), "fort" (360°)
     "couteaux": {},            # {nom: {"image": chemin, "duree": secondes entre début et fin}}
 }
 
@@ -278,6 +279,16 @@ BLEND_MODES = {"mix": "Frame Mix (comme After Effects)",
                "off": "Aucun"}
 
 
+BLUR_MODES = {"off": "Aucun", "normal": "Normal (180°, comme une caméra)", "fort": "Fort (360°, très lisse)"}
+_SHUTTER = {"off": 0.0, "normal": 0.5, "fort": 1.0}
+MAX_SAMPLES = 10
+
+
+def blur_mode(cfg):
+    m = cfg.get("flou")
+    return m if m in BLUR_MODES else "normal"
+
+
 def blend_mode(cfg):
     m = cfg.get("blending_mode")
     if m in BLEND_MODES:
@@ -323,18 +334,36 @@ def _render(path, start, end, cfg, output, is_cancelled=None, progress=None):
     times = [source_time(min(k / FPS, total), start, end, cfg) for k in range(n_out)]
 
     sfps = source_fps(path)
-    factor = (2 if sfps >= 50 else 4) if mode == "motion" else 1
+    # Pixel Motion : on vise ~240 images/s de source pour un ralenti sans saccade
+    factor = max(2, min(6, int(round(240 / sfps)))) if mode == "motion" else 1
     rate = sfps * factor                                     # images par seconde après interpolation
-    lo = max(0.0, min(times) - 2 / sfps)
-    hi = max(times) + 2 / sfps
-    pos = [(s - lo) * rate for s in times]
-    needed = set()
-    for x in pos:
-        i = int(x)
-        if mode == "off":
-            needed.add(int(round(x)))
+    shutter = _SHUTTER[blur_mode(cfg)]
+
+    # chaque image de sortie = moyenne d'échantillons répartis sur l'obturateur (flou de mouvement) ;
+    # au ralenti la fenêtre fait moins d'une image -> simple mélange des 2 voisines (Frame Mix)
+    samples = []
+    for k, t in enumerate(times):
+        a = times[max(0, k - 1)]
+        b = times[min(n_out - 1, k + 1)]
+        span = abs(b - a) / (2 if 0 < k < n_out - 1 else 1)  # secondes de source par image de sortie
+        w = shutter * span
+        if w * rate <= 1.0:
+            samples.append([t])
         else:
-            needed.update((i, i + 1))
+            n = min(MAX_SAMPLES, int(np.ceil(w * rate)) + 1)
+            samples.append(list(np.linspace(t - w / 2, t + w / 2, n)))
+    flat = [x for ss in samples for x in ss]
+    lo = max(0.0, min(flat) - 2 / sfps)
+    hi = max(flat) + 2 / sfps
+    pos = [[max(0.0, (x - lo) * rate) for x in ss] for ss in samples]
+    needed = set()
+    for ss in pos:
+        for x in ss:
+            i = int(x)
+            if mode == "off" or len(ss) > 1:
+                needed.add(int(round(x)))
+            else:
+                needed.update((i, i + 1))
     last_needed = max(needed)
 
     vf = f"fps={sfps:g}"
@@ -382,16 +411,24 @@ def _render(path, start, end, cfg, output, is_cancelled=None, progress=None):
     with tempfile.TemporaryFile() as err:
         enc = subprocess.Popen([audio.ffmpeg_exe(), "-y", "-hide_banner", "-f", "rawvideo", "-pix_fmt", "rgb24",
                                 "-s", f"{W}x{H}", "-r", str(FPS), "-i", "-", "-c:v", "libx264", "-preset",
-                                "veryfast", "-crf", "16", "-pix_fmt", "yuv420p", str(output)],
+                                "medium", "-crf", "14", "-pix_fmt", "yuv420p", str(output)],
                                stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=err,
                                creationflags=audio._NO_WINDOW)
         try:
-            for k, x in enumerate(pos):
+            top = float(lastframe if lastframe is not None else 0)
+            for k, ss in enumerate(pos):
                 if is_cancelled and is_cancelled():
                     raise InterruptedError()
                 if progress and k % 8 == 0:
                     progress(0.85 + 0.15 * k / len(pos), f"{label} : assemblage {k}/{len(pos)}")
-                x = min(max(x, 0.0), float(lastframe if lastframe is not None else 0))
+                if len(ss) > 1:                    # flou de mouvement : moyenne des échantillons
+                    acc = np.zeros(size, np.float32)
+                    for x in ss:
+                        acc += frame(int(round(min(x, top))))
+                    img = np.clip(acc / len(ss) + 0.5, 0, 255).astype(np.uint8)
+                    enc.stdin.write(img.tobytes())
+                    continue
+                x = min(max(ss[0], 0.0), top)
                 if mode == "off":
                     img = frame(int(round(x)))
                 else:
