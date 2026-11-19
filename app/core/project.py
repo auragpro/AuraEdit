@@ -225,6 +225,36 @@ def remove_recent(path):
 
 # ------------------------------------------- dossiers de clips (couteaux) ----
 
+def clips_dir():
+    """Bibliothèque de clips d'AuraEdit : Documents/AuraEdit/Clips/<couteau>/."""
+    d = projects_dir().parent / "Clips"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def store_clip(src, knife):
+    """Copie le clip dans la bibliothèque d'AuraEdit (s'il n'y est pas déjà) et renvoie la copie."""
+    import shutil
+    src = Path(src)
+    lib = clips_dir()
+    try:
+        src.resolve().relative_to(lib.resolve())
+        return str(src)                          # déjà dans la bibliothèque
+    except ValueError:
+        pass
+    folder = lib / re.sub(r'[<>:"/\\|?*]', "_", knife)
+    folder.mkdir(parents=True, exist_ok=True)
+    target = folder / src.name
+    n = 2
+    while target.exists():
+        if target.stat().st_size == src.stat().st_size:
+            return str(target)                   # même clip déjà copié
+        target = folder / f"{src.stem} ({n}){src.suffix}"
+        n += 1
+    shutil.copy2(src, target)
+    return str(target)
+
+
 def _folders_file():
     return config_dir() / "dossiers_clips.json"
 

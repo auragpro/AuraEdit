@@ -60,6 +60,28 @@ def save(cfg):
         pass
 
 
+def _clips_file():
+    return config_dir() / "time_remap_clips.json"
+
+
+def clip_remaps():
+    """{chemin du clip: {"couteau", "debut", "fin"}} — gardé pour tous les projets."""
+    try:
+        d = json.loads(_clips_file().read_text(encoding="utf-8"))
+        return d if isinstance(d, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def save_clip_remap(path, data):
+    d = clip_remaps()
+    d[str(path)] = data
+    try:
+        _clips_file().write_text(json.dumps(d, ensure_ascii=False, indent=1), encoding="utf-8")
+    except OSError:
+        pass
+
+
 def knife_dir():
     d = config_dir() / "couteaux"
     d.mkdir(parents=True, exist_ok=True)

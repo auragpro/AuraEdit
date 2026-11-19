@@ -13,9 +13,9 @@ from version import __version__
 from .style import RED, asset
 
 WHATS_NEW = [
-    "Time remap : keyframe 1 trouvée juste après le kill, quand le couteau disparaît",
-    "Time remap automatique sur tes clips de couteau, avec tes courbes",
-    "Frame blending pour un ralenti fluide",
+    "Clips sauvegardés dans AuraEdit, chacun utilisé une seule fois par edit",
+    "Time remap de chaque clip gardé pour tous tes projets",
+    "Time remap : keyframe 1 trouvée juste après le kill",
 ]
 
 

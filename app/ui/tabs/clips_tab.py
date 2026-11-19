@@ -2,6 +2,8 @@
 from pathlib import Path
 
 from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtGui import QColor
+from PyQt6.QtWidgets import QApplication, QProgressDialog
 from PyQt6.QtWidgets import (QAbstractItemView, QButtonGroup, QFileDialog, QHBoxLayout, QInputDialog,
                              QLabel, QListWidget, QListWidgetItem, QMessageBox, QPushButton,
                              QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget)
@@ -188,9 +190,12 @@ class ClipsTab(QWidget):
         return item
 
     def _clip_child(self, parent, path):
-        child = QTreeWidgetItem(parent, [_name(path)])
+        used = path in self.project.clips
+        child = QTreeWidgetItem(parent, [("✓ déjà dans l'edit — " if used else "") + _name(path)])
         child.setData(0, ROLE, str(path))
         child.setToolTip(0, str(path))
+        if used:                                   # un clip ne sert qu'une fois dans l'edit
+            child.setForeground(0, QColor("#6b7785"))
         return child
 
     def refresh_left(self):
@@ -273,12 +278,32 @@ class ClipsTab(QWidget):
                                         names.index(current) if current in names else 0, False)
         return name if ok else None
 
+    def _store(self, name, paths):
+        """Copie les clips dans la bibliothèque d'AuraEdit (Documents/AuraEdit/Clips/<couteau>)."""
+        out = []
+        dlg = QProgressDialog("Sauvegarde des clips dans AuraEdit...", "Arrêter", 0, len(paths), self)
+        dlg.setWindowModality(Qt.WindowModality.WindowModal)
+        dlg.setMinimumDuration(300)
+        for i, p in enumerate(paths):
+            if dlg.wasCanceled():
+                break
+            dlg.setValue(i)
+            dlg.setLabelText(f"Sauvegarde dans AuraEdit : {Path(p).name}")
+            QApplication.processEvents()
+            try:
+                out.append(proj.store_clip(p, name))
+            except OSError:
+                out.append(p)                      # copie impossible : on garde l'original
+        dlg.setValue(len(paths))
+        return out
+
     def _add_to_folder(self, name, paths):
         clips = self.folders[name]
-        new = [p for p in paths if p not in clips]
+        stored = self._store(name, [p for p in paths if p not in clips])
+        new = [p for p in stored if p not in clips]
         clips += new
         self._save_folders()
-        self.status.setText(f"{len(new)} clip(s) ajouté(s) au dossier « {name} ».")
+        self.status.setText(f"{len(new)} clip(s) sauvegardé(s) dans le dossier « {name} ».")
 
     def fill_folder(self):
         name = self._selected_folder() or self._ask_folder("Ajouter des clips")
@@ -312,7 +337,7 @@ class ClipsTab(QWidget):
             if not vids:
                 continue
             clips = self.folders.setdefault(name, [])
-            new = [v for v in vids if v not in clips]
+            new = [v for v in self._store(name, vids) if v not in clips]
             clips += new
             total += len(new)
         self._save_folders()
@@ -390,10 +415,20 @@ class ClipsTab(QWidget):
                 new.append(p)
         skipped = len(paths) - added
         if skipped:
-            self.status.setText(f"{skipped} clip(s) déjà dans l'edit, ignoré(s).")
+            self.status.setText(f"{skipped} clip(s) déjà dans l'edit : chaque clip ne sert qu'une fois.")
+        # time remap déjà fait pour ce clip (dans un autre projet) : on le reprend directement
+        from app.core import timeremap
+        saved = timeremap.clip_remaps()
+        todo = []
+        for p in new:
+            if p in saved:
+                self.project.remaps[p] = saved[p]
+            else:
+                todo.append(p)
         self.sync()
-        if self.mode == "Clips" and new:
-            self.open_remap(new)
+        self.refresh_left()
+        if self.mode == "Clips" and todo:
+            self.open_remap(todo)
 
     # ------------------------------------------------------- time remap
     def _knife_of(self, path):
@@ -438,10 +473,12 @@ class ClipsTab(QWidget):
         for it in self.order.selectedItems():
             self.order.takeItem(self.order.row(it))
         self.sync()
+        self.refresh_left()
 
     def clear(self):
         self.order.clear()
         self.sync()
+        self.refresh_left()
 
     def sync(self, *args):
         self.project.clips = [self.order.item(i).data(ROLE) for i in range(self.order.count())]

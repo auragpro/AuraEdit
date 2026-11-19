@@ -147,7 +147,7 @@ class TimeRemapDialog(QDialog):
         self.cfg = tr.load()
         self.skip_all = False
         self.thread = None
-        old = project.remaps.get(path) or {}
+        old = project.remaps.get(path) or tr.clip_remaps().get(path) or {}
 
         title = QLabel(f"Time remap — {Path(path).name}")
         title.setObjectName("h1")
@@ -361,7 +361,9 @@ class TimeRemapDialog(QDialog):
             if img:
                 k["image"] = img
         tr.save(self.cfg)
-        self.project.remaps[self.path] = {"couteau": name, "debut": round(start, 4), "fin": round(end, 4)}
+        data = {"couteau": name, "debut": round(start, 4), "fin": round(end, 4)}
+        self.project.remaps[self.path] = data
+        tr.save_clip_remap(self.path, data)
         self.accept()
 
     def _later(self):

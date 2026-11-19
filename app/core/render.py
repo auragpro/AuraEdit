@@ -50,7 +50,7 @@ def segments(project):
     segs = []
     if project.intro:
         segs.append(("intro", project.intro))
-    segs += [("clip", c) for c in project.clips]
+    segs += [("clip", c) for c in dict.fromkeys(project.clips)]      # chaque clip une seule fois
     if project.outro:
         segs.append(("outro", project.outro))
     return [(k, p) for k, p in segs if p and Path(p).is_file()]
