@@ -5,7 +5,7 @@
   2. presque à la fin  -> la frame « couteau sorti » (jusqu'où va le time remap)
   3. à la fin          -> copie de la 1re : retour en arrière (reverse)
 Entre 1 et 2 : courbe 1 ; entre 2 et 3 : courbe 2 (format « x1, y1, x2, y2 » comme Flow / AE).
-Le frame blending mélange les frames voisines : ralenti fluide, et flou de mouvement dans le reverse.
+Pixel Motion : images intermédiaires calculées (flux optique) pour un ralenti fluide sans images dédoublées.
 """
 import json
 import re
@@ -30,8 +30,8 @@ DEFAULTS = {
     "duree_ralenti": 1.0,      # secondes entre la keyframe 1 et la 2
     "frames_retour": 6,        # frames entre la keyframe 2 et la 3 (le reverse)
     "blending": True,
-    "blending_mode": "mix",    # "mix" (Frame Mix), "motion" (Pixel Motion) ou "off"
-    "flou": "normal",          # flou de mouvement sur les passages rapides : "off", "normal" (180°), "fort" (360°)
+    "blending_mode": "motion", # "motion" (Pixel Motion), "mix" (Frame Mix) ou "off"
+    "mode_v2": False,          # passage automatique au Pixel Motion (une seule fois)
     "couteaux": {},            # {nom: {"image": chemin, "duree": secondes entre début et fin}}
 }
 
@@ -52,6 +52,10 @@ def load():
         pass
     if not isinstance(cfg.get("couteaux"), dict):
         cfg["couteaux"] = {}
+    if not cfg.get("mode_v2"):                     # le Frame Mix dédouble les images : Pixel Motion par défaut
+        cfg["blending_mode"] = "motion"
+        cfg["blending"] = True
+        cfg["mode_v2"] = True
     return cfg
 
 
@@ -274,19 +278,9 @@ def save_knife_image(name, path, t):
 
 # ----------------------------------------------------------------- rendu ----
 
-BLEND_MODES = {"mix": "Frame Mix (comme After Effects)",
-               "motion": "Pixel Motion (le plus fluide, plus lent)",
+BLEND_MODES = {"motion": "Pixel Motion (le plus fluide, recommandé)",
+               "mix": "Frame Mix (mélange 2 images, peut dédoubler)",
                "off": "Aucun"}
-
-
-BLUR_MODES = {"off": "Aucun", "normal": "Normal (180°, comme une caméra)", "fort": "Fort (360°, très lisse)"}
-_SHUTTER = {"off": 0.0, "normal": 0.5, "fort": 1.0}
-MAX_SAMPLES = 10
-
-
-def blur_mode(cfg):
-    m = cfg.get("flou")
-    return m if m in BLUR_MODES else "normal"
 
 
 def blend_mode(cfg):
@@ -415,21 +409,7 @@ def _render(path, start, end, cfg, output, is_cancelled=None, progress=None):
     # Pixel Motion : on vise ~240 images/s de source pour un ralenti sans saccade
     factor = max(2, min(6, int(round(240 / sfps)))) if mode == "motion" else 1
     rate = sfps * factor                                     # images par seconde après interpolation
-    shutter = _SHUTTER[blur_mode(cfg)]
-
-    # chaque image de sortie = moyenne d'échantillons répartis sur l'obturateur (flou de mouvement) ;
-    # au ralenti la fenêtre fait moins d'une image -> simple mélange des 2 voisines (Frame Mix)
-    samples = []
-    for k, t in enumerate(times):
-        a = times[max(0, k - 1)]
-        b = times[min(n_out - 1, k + 1)]
-        span = abs(b - a) / (2 if 0 < k < n_out - 1 else 1)  # secondes de source par image de sortie
-        w = shutter * span
-        if w * rate <= 1.0:
-            samples.append([t])
-        else:
-            n = min(MAX_SAMPLES, int(np.ceil(w * rate)) + 1)
-            samples.append(list(np.linspace(t - w / 2, t + w / 2, n)))
+    samples = [[t] for t in times]                 # une seule image par image de sortie : pas de flou
     flat = [x for ss in samples for x in ss]
     lo = max(0.0, min(flat) - 2 / sfps)
     hi = max(flat) + 2 / sfps
@@ -438,7 +418,7 @@ def _render(path, start, end, cfg, output, is_cancelled=None, progress=None):
     for ss in pos:
         for x in ss:
             i = int(x)
-            if mode == "off" or len(ss) > 1:
+            if mode == "off":
                 needed.add(int(round(x)))
             else:
                 needed.update((i, i + 1))
@@ -471,13 +451,6 @@ def _render(path, start, end, cfg, output, is_cancelled=None, progress=None):
                     raise InterruptedError()
                 if progress and k % 8 == 0:
                     progress(0.85 + 0.15 * k / len(pos), f"{label} : assemblage {k}/{len(pos)}")
-                if len(ss) > 1:                    # flou de mouvement : moyenne des échantillons
-                    acc = np.zeros(W * H * 3, np.float32)
-                    for x in ss:
-                        acc += frame(int(round(min(x, top))))
-                    img = np.clip(acc / len(ss) + 0.5, 0, 255).astype(np.uint8)
-                    enc.stdin.write(img.tobytes())
-                    continue
                 x = min(max(ss[0], 0.0), top)
                 if mode == "off":
                     img = frame(int(round(x)))

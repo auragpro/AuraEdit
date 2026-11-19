@@ -238,11 +238,6 @@ class TimeRemapDialog(QDialog):
         for key, label in tr.BLEND_MODES.items():
             self.blend.addItem(label, key)
         self.blend.setCurrentIndex(list(tr.BLEND_MODES).index(tr.blend_mode(self.cfg)))
-        self.blur = QComboBox()
-        for key, label in tr.BLUR_MODES.items():
-            self.blur.addItem(label, key)
-        self.blur.setCurrentIndex(list(tr.BLUR_MODES).index(tr.blur_mode(self.cfg)))
-        self.blur.setToolTip("Floute les passages rapides (flick, retour) pour qu'ils soient plus fluides.")
         self.preview = CurvePreview()
         self._curves()
         grid = QGridLayout()
@@ -256,8 +251,6 @@ class TimeRemapDialog(QDialog):
         grid.addWidget(self.back, 3, 1)
         grid.addWidget(QLabel("Frame blending"), 4, 0)
         grid.addWidget(self.blend, 4, 1)
-        grid.addWidget(QLabel("Flou de mouvement"), 5, 0)
-        grid.addWidget(self.blur, 5, 1)
         settings = QHBoxLayout()
         settings.addLayout(grid, 1)
         settings.addWidget(self.preview, 1)
@@ -389,7 +382,6 @@ class TimeRemapDialog(QDialog):
         self.cfg["frames_retour"] = self.back.value()
         self.cfg["blending_mode"] = self.blend.currentData()
         self.cfg["blending"] = self.cfg["blending_mode"] != "off"
-        self.cfg["flou"] = self.blur.currentData()
 
     def preview_render(self):
         if self.preview_thread is not None and self.preview_thread.isRunning():

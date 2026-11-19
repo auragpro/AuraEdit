@@ -1,5 +1,5 @@
-## Nouveautés de la version 0.6.5
+## Nouveautés de la version 0.6.6
 
-- **Time remap depuis la Bibliothèque** : dans Mes clips, ouvre un couteau puis **double-clique un clip** (ou bouton **⏱ Time remap...**) pour changer son remap : keyframes, courbes, frame blending, flou de mouvement.
-- Les clips qui ont déjà un remap sont marqués **⏱**.
-- Le remap modifié est **repris automatiquement** dans tes projets qui utilisent ce clip.
+- **Fini les images dédoublées** : le flou de mouvement superposait plusieurs images (effet « fantôme »). Il est **supprimé**, ainsi que son option.
+- **Pixel Motion par défaut** : le logiciel calcule de vraies images intermédiaires au lieu de mélanger deux images éloignées. Le ralenti est plus fluide et reste net.
+- Le Frame Mix reste disponible dans « Frame blending » si tu le veux.
