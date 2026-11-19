@@ -4,19 +4,12 @@ from PyQt6.QtWidgets import (QHBoxLayout, QLabel, QListWidget, QListWidgetItem, 
                              QPushButton, QStackedWidget, QVBoxLayout, QWidget)
 
 from .style import PANEL
-from .tabs.clips_tab import ClipsTab
-from .tabs.dash_tab import DashTab
 from .tabs.home_tab import HomeTab
-from .tabs.intro_tab import IntroTab
-from .tabs.kunai_tab import KunaiTab
-from .tabs.music_tab import MusicTab
+from .tabs.montage_tab import PARTS, MontageTab
 from .tabs.sounds_tab import SoundsTab
 
 # (nom, classe, catégorie) — les onglets d'une même catégorie sont regroupés sous un titre
-TABS = [("Accueil", HomeTab, None),
-        ("Intro", IntroTab, "MONTAGE"), ("Musique", MusicTab, "MONTAGE"), ("Clips", ClipsTab, "MONTAGE"),
-        ("Kunai", KunaiTab, "MONTAGE"), ("Dash", DashTab, "MONTAGE"),
-        ("Sons IA", SoundsTab, "AUDIO")]
+TABS = [("Accueil", HomeTab, None), ("Montage", MontageTab, None), ("Sons IA", SoundsTab, None)]
 ROLE = Qt.ItemDataRole.UserRole
 
 
@@ -55,8 +48,7 @@ class EditView(QWidget):
             self.sidebar.addItem(item)
             self.rows[name] = self.sidebar.count() - 1
         self.tabs["Accueil"].go_to.connect(self.select)
-        self.tabs["Kunai"].changed.connect(self.tabs["Clips"].refresh_left)
-        self.tabs["Dash"].changed.connect(self.tabs["Clips"].refresh_left)
+        self.tabs["Montage"].render_requested.connect(self._render)
         self.sidebar.currentRowChanged.connect(self._row)
 
         self.title = QLabel(project.name)
@@ -88,8 +80,18 @@ class EditView(QWidget):
         item = self.sidebar.item(row)
         if item is not None and item.data(ROLE) is not None:
             self.pages.setCurrentIndex(item.data(ROLE))
+            if self.pages.currentWidget() is self.tabs.get("Montage"):
+                self.tabs["Montage"].home()            # revient aux gros carrés
+
+    def _render(self):
+        self.select("Accueil")
+        self.tabs["Accueil"].render()
 
     def select(self, name):
+        if name in [n for n, _ in PARTS]:          # une partie du Montage
+            self.sidebar.setCurrentRow(self.rows["Montage"])
+            self.tabs["Montage"].open(name)
+            return
         if name in self.rows:
             self.sidebar.setCurrentRow(self.rows[name])
 
@@ -98,6 +100,7 @@ class EditView(QWidget):
         self.title.setText(self.project.name)
         self.renamed.emit(self.project.name)
         self.tabs["Accueil"].refresh()
+        self.tabs["Montage"].refresh()
         self.save()
 
     def save(self):
