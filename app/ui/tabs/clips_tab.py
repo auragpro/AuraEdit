@@ -73,6 +73,76 @@ def _symbol(text, size=30):
     return out
 
 
+class DropList(QListWidget):
+    """Liste qui accepte les vidéos (ou dossiers) glissées depuis l'Explorateur Windows."""
+    files_dropped = pyqtSignal(list, object)     # chemins des vidéos, élément sous la souris (ou None)
+
+    def __init__(self, hint="", parent=None):
+        super().__init__(parent)
+        self.hint = hint
+        self._over = False
+        self.setAcceptDrops(True)
+        self.viewport().setAcceptDrops(True)
+        self.setDropIndicatorShown(True)
+
+    @staticmethod
+    def _videos(event):
+        out = []
+        for url in event.mimeData().urls():
+            if not url.isLocalFile():
+                continue
+            p = Path(url.toLocalFile())
+            if p.is_dir():
+                out += proj.scan_videos([p])
+            elif p.suffix.lower() in proj.VIDEO_EXT:
+                out.append(str(p))
+        return out
+
+    def _set_over(self, on):
+        self._over = on
+        self.setStyleSheet("QListWidget { border: 2px dashed #ff4655; }" if on else "")
+        if self.objectName() == "knives":
+            self.setStyleSheet(GRID_CSS + ("QListWidget#knives { border: 2px dashed #ff4655; }" if on else ""))
+
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+            self._set_over(True)
+        else:
+            super().dragEnterEvent(event)
+
+    def dragMoveEvent(self, event):
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+        else:
+            super().dragMoveEvent(event)
+
+    def dragLeaveEvent(self, event):
+        self._set_over(False)
+        super().dragLeaveEvent(event)
+
+    def dropEvent(self, event):
+        if event.mimeData().hasUrls():
+            self._set_over(False)
+            item = self.itemAt(event.position().toPoint())
+            files = self._videos(event)
+            event.acceptProposedAction()
+            self.files_dropped.emit(files, item)
+        else:
+            super().dropEvent(event)
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        if self.count() == 0 and self.hint:
+            p = QPainter(self.viewport())
+            p.setPen(QColor("#6b7785"))
+            f = p.font()
+            f.setPointSize(11)
+            p.setFont(f)
+            p.drawText(self.viewport().rect(), Qt.AlignmentFlag.AlignCenter, self.hint)
+            p.end()
+
+
 class ClipsTab(QWidget):
     changed = pyqtSignal()
 
@@ -103,8 +173,9 @@ class ClipsTab(QWidget):
         self.filter = QLineEdit()
         self.filter.setPlaceholderText("Filtrer les couteaux...")
         self.filter.textChanged.connect(self._filter)
-        self.grid = QListWidget()
+        self.grid = DropList()
         self.grid.setObjectName("knives")
+        self.grid.files_dropped.connect(self._dropped_on_grid)
         self.grid.setStyleSheet(GRID_CSS)
         self.grid.setViewMode(QListView.ViewMode.IconMode)
         self.grid.setResizeMode(QListView.ResizeMode.Adjust)
@@ -135,14 +206,15 @@ class ClipsTab(QWidget):
         self.knife_title.setStyleSheet("font-size: 18px; font-weight: 700;")
         b_img = QPushButton("Image du couteau...")
         b_img.clicked.connect(self.pick_knife_image)
-        b_fill = QPushButton("Ajouter des clips...")
+        b_fill = QPushButton("Ajouter des clips...  (ou glisse-les dans la liste)")
         b_fill.setObjectName("primary")
         b_fill.clicked.connect(self.fill_folder)
-        b_rm = QPushButton("Retirer du couteau")
+        b_rm = QPushButton("Retirer")
         b_rm.clicked.connect(self.remove_from_knife)
         b_delk = QPushButton("Supprimer le couteau")
         b_delk.clicked.connect(self.delete_knife)
-        self.clips = QListWidget()
+        self.clips = DropList("Glisse tes clips ici\n(depuis l'Explorateur Windows)")
+        self.clips.files_dropped.connect(self._dropped_on_knife)
         self.clips.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.clips.itemDoubleClicked.connect(lambda it: self.add_to_edit([it.data(ROLE)]))
         info = QVBoxLayout()
@@ -152,10 +224,12 @@ class ClipsTab(QWidget):
         top = QHBoxLayout()
         top.addWidget(self.knife_img)
         top.addLayout(info, 1)
-        krow = QHBoxLayout()
+        krow = QVBoxLayout()
         krow.addWidget(b_fill)
-        krow.addWidget(b_rm)
-        krow.addWidget(b_delk)
+        krow2 = QHBoxLayout()
+        krow2.addWidget(b_rm)
+        krow2.addWidget(b_delk)
+        krow.addLayout(krow2)
         knife_page = QWidget()
         kl = QVBoxLayout(knife_page)
         kl.setContentsMargins(0, 0, 0, 0)
@@ -347,6 +421,25 @@ class ClipsTab(QWidget):
         else:
             self.open_knife(name)
 
+    def _dropped_on_knife(self, files, _item):
+        if not files:
+            self.status.setText("Aucune vidéo dans ce que tu as glissé.")
+            return
+        if self.knife:
+            self._add_to_folder(self.knife, files)
+            self._fill_knife()
+
+    def _dropped_on_grid(self, files, item):
+        if not files:
+            self.status.setText("Aucune vidéo dans ce que tu as glissé.")
+            return
+        name = item.data(ROLE_DIR) if item is not None else None
+        if not name or name == NEW:
+            self.status.setText("Lâche tes clips sur la carte d'un couteau (ou ouvre un couteau).")
+            return
+        self._add_to_folder(name, files)
+        self.open_knife(name)
+
     def open_knife(self, name):
         self.knife = name
         self._fill_knife()
@@ -371,7 +464,7 @@ class ClipsTab(QWidget):
                 it.setForeground(QColor("#6b7785"))
             self.clips.addItem(it)
         self.status.setText("Double-clique un clip (ou sélectionne-les puis « Ajouter → »)."
-                            if clips else "Aucun clip : clique « Ajouter des clips... ».")
+                            if clips else "Aucun clip : glisse tes vidéos dans la liste, ou « Ajouter des clips... ».")
 
     def _selected_paths(self):
         """Clips sélectionnés ; une carte de couteau sélectionnée = tous ses clips."""
