@@ -4,12 +4,14 @@ from PyQt6.QtWidgets import (QHBoxLayout, QLabel, QListWidget, QListWidgetItem, 
                              QPushButton, QStackedWidget, QVBoxLayout, QWidget)
 
 from .style import PANEL
+from .tabs.clips_tab import LibraryTab
 from .tabs.home_tab import HomeTab
 from .tabs.montage_tab import PARTS, MontageTab
 from .tabs.sounds_tab import SoundsTab
 
 # (nom, classe, catégorie) — les onglets d'une même catégorie sont regroupés sous un titre
-TABS = [("Accueil", HomeTab, None), ("Montage", MontageTab, None), ("Sons IA", SoundsTab, None)]
+TABS = [("Accueil", HomeTab, None), ("Montage", MontageTab, None), ("Sons IA", SoundsTab, None),
+        ("Mes clips", LibraryTab, "BIBLIOTHÈQUE")]
 ROLE = Qt.ItemDataRole.UserRole
 
 
@@ -49,6 +51,7 @@ class EditView(QWidget):
             self.rows[name] = self.sidebar.count() - 1
         self.tabs["Accueil"].go_to.connect(self.select)
         self.tabs["Montage"].render_requested.connect(self._render)
+        self.tabs["Montage"].parts["Clips"].go_library.connect(lambda: self.select("Mes clips"))
         self.sidebar.currentRowChanged.connect(self._row)
 
         self.title = QLabel(project.name)

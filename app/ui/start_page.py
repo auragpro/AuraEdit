@@ -13,9 +13,9 @@ from version import __version__
 from .style import RED, asset
 
 WHATS_NEW = [
-    "Export plus rapide : Pixel Motion sur tous les cœurs du processeur, sans perte",
-    "Flickaway plus fluides : flou de mouvement sur les passages rapides",
-    "Mes claps : choisis tes propres sons pour clip, dash et kunai",
+    "Bibliothèque « Mes clips » : tes clips sauvegardés pour tous tes projets",
+    "Confirmation à chaque suppression de clip",
+    "Export plus rapide : Pixel Motion sur tous les cœurs du processeur",
 ]
 
 

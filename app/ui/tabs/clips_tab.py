@@ -143,12 +143,23 @@ class DropList(QListWidget):
             p.end()
 
 
-class ClipsTab(QWidget):
-    changed = pyqtSignal()
+def confirm(parent, title, text):
+    """Petite fenêtre « Oui / Non » ; Non est le choix par défaut."""
+    return QMessageBox.question(parent, title, text,
+                                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                                QMessageBox.StandardButton.No) == QMessageBox.StandardButton.Yes
 
-    def __init__(self, project, parent=None):
+
+class ClipsTab(QWidget):
+    """library=False : choix des clips pour l'edit (on ne peut rien supprimer de la bibliothèque).
+    library=True : la Bibliothèque « Mes clips » (ajouter / supprimer les clips, sauvegardés pour tous les projets)."""
+    changed = pyqtSignal()
+    go_library = pyqtSignal()
+
+    def __init__(self, project, parent=None, library=False):
         super().__init__(parent)
         self.project = project
+        self.library = library
         self.folders = proj.load_clip_folders()     # {couteau: [clips]}
         self.mode = "Clips"
         self.knife = None                           # couteau ouvert (page de ses clips)
@@ -209,14 +220,15 @@ class ClipsTab(QWidget):
         b_fill = QPushButton("Ajouter des clips...  (ou glisse-les dans la liste)")
         b_fill.setObjectName("primary")
         b_fill.clicked.connect(self.fill_folder)
-        b_rm = QPushButton("Retirer")
+        b_rm = QPushButton("Supprimer le clip")
         b_rm.clicked.connect(self.remove_from_knife)
         b_delk = QPushButton("Supprimer le couteau")
         b_delk.clicked.connect(self.delete_knife)
         self.clips = DropList("Glisse tes clips ici\n(depuis l'Explorateur Windows)")
         self.clips.files_dropped.connect(self._dropped_on_knife)
         self.clips.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
-        self.clips.itemDoubleClicked.connect(lambda it: self.add_to_edit([it.data(ROLE)]))
+        if not library:
+            self.clips.itemDoubleClicked.connect(lambda it: self.add_to_edit([it.data(ROLE)]))
         info = QVBoxLayout()
         info.addWidget(self.knife_title)
         info.addWidget(b_img)
@@ -253,10 +265,25 @@ class ClipsTab(QWidget):
         self.status.setObjectName("hint")
         self.status.setWordWrap(True)
 
+        # éditeur de clips : lecture seule, on gère les clips dans la Bibliothèque
+        b_lib = QPushButton("📚  Ajouter / supprimer des clips : Bibliothèque « Mes clips »")
+        b_lib.setObjectName("link")
+        b_lib.clicked.connect(self.go_library.emit)
+        if library:
+            b_lib.hide()
+        else:
+            for b in (b_import, b_img, b_fill, b_rm, b_delk):
+                b.hide()
+            for w in (self.grid, self.clips):
+                w.setAcceptDrops(False)
+                w.viewport().setAcceptDrops(False)
+                w.hint = ""
+
         left = QVBoxLayout()
         left.addLayout(mode_row)
         left.addWidget(self.left_stack, 1)
         left.addWidget(self.status)
+        left.addWidget(b_lib, alignment=Qt.AlignmentFlag.AlignLeft)
 
         # --- milieu
         self.btn_add = QPushButton("Ajouter  →")
@@ -299,19 +326,30 @@ class ClipsTab(QWidget):
         cols = QHBoxLayout()
         cols.setSpacing(16)
         cols.addLayout(left, 3)
-        cols.addLayout(middle)
-        cols.addLayout(right, 2)
-
         lay = QVBoxLayout(self)
         lay.setContentsMargins(32, 28, 32, 28)
-        lay.addWidget(page_header("Clips", "Choisis un couteau pour voir ses clips. En haut à gauche, "
-                                           "choisis ce que tu ajoutes : Clips, Kunai ou Dash."))
+        if library:
+            for i in range(mode_row.count()):
+                mode_row.itemAt(i).widget().hide()
+            lay.addWidget(page_header("Mes clips", "Ta bibliothèque : une carte par couteau. Les clips ajoutés ici "
+                                                   "sont sauvegardés dans AuraEdit et disponibles dans tous tes projets."))
+        else:
+            cols.addLayout(middle)
+            cols.addLayout(right, 2)
+            lay.addWidget(page_header("Clips", "Choisis un couteau pour voir ses clips. En haut à gauche, "
+                                               "choisis ce que tu ajoutes : Clips, Kunai ou Dash."))
         lay.addLayout(cols, 1)
 
         for c in project.clips:
             self.order.addItem(self._order_item(c))
         self.refresh_left()
         self._update_count()
+
+    def showEvent(self, event):
+        """La bibliothèque a pu changer (autre onglet) : on recharge."""
+        super().showEvent(event)
+        self.folders = proj.load_clip_folders()
+        self.refresh_left()
 
     # ---------------------------------------------------------- affichage
     def _style_modes(self):
@@ -372,7 +410,9 @@ class ClipsTab(QWidget):
                 self.knife = None
                 self.left_stack.setCurrentIndex(0)
                 self.status.setText("" if self.folders else
-                                    "Crée une carte par couteau avec « Nouveau couteau », puis ajoute ses clips.")
+                                    ("Crée une carte par couteau avec « Nouveau couteau », puis ajoute ses clips."
+                                     if self.library else
+                                     "Aucun clip : ajoute-les dans la Bibliothèque « Mes clips »."))
         else:
             self.tree.clear()
             st = self.project.kunai if self.mode == "Kunai" else self.project.dash
@@ -391,10 +431,11 @@ class ClipsTab(QWidget):
 
     def _fill_grid(self):
         self.grid.clear()
-        new = QListWidgetItem(QIcon(_symbol("＋", 34)), "Nouveau couteau")
-        new.setData(ROLE_DIR, NEW)
-        new.setSizeHint(QSize(CARD_W + 16, CARD_H + 46))
-        self.grid.addItem(new)
+        if self.library:
+            new = QListWidgetItem(QIcon(_symbol("＋", 34)), "Nouveau couteau")
+            new.setData(ROLE_DIR, NEW)
+            new.setSizeHint(QSize(CARD_W + 16, CARD_H + 46))
+            self.grid.addItem(new)
         for name in sorted(self.folders, key=str.lower):
             clips = self.folders[name]
             free = sum(1 for c in clips if c not in self.project.clips)
@@ -422,6 +463,8 @@ class ClipsTab(QWidget):
             self.open_knife(name)
 
     def _dropped_on_knife(self, files, _item):
+        if not self.library:
+            return
         if not files:
             self.status.setText("Aucune vidéo dans ce que tu as glissé.")
             return
@@ -430,6 +473,8 @@ class ClipsTab(QWidget):
             self._fill_knife()
 
     def _dropped_on_grid(self, files, item):
+        if not self.library:
+            return
         if not files:
             self.status.setText("Aucune vidéo dans ce que tu as glissé.")
             return
@@ -463,8 +508,12 @@ class ClipsTab(QWidget):
             if used:
                 it.setForeground(QColor("#6b7785"))
             self.clips.addItem(it)
-        self.status.setText("Double-clique un clip (ou sélectionne-les puis « Ajouter → »)."
-                            if clips else "Aucun clip : glisse tes vidéos dans la liste, ou « Ajouter des clips... ».")
+        if self.library:
+            self.status.setText("Glisse tes vidéos dans la liste, ou « Ajouter des clips... »." if not clips else
+                                "Sélectionne un clip puis « Supprimer le clip » pour l'enlever de ta bibliothèque.")
+        else:
+            self.status.setText("Double-clique un clip (ou sélectionne-les puis « Ajouter → »)."
+                                if clips else "Aucun clip : ajoute-les dans la Bibliothèque « Mes clips ».")
 
     def _selected_paths(self):
         """Clips sélectionnés ; une carte de couteau sélectionnée = tous ses clips."""
@@ -584,20 +633,28 @@ class ClipsTab(QWidget):
         self.status.setText(f"{total} clip(s) importé(s) dans {len(groups)} couteau(x).")
 
     def remove_from_knife(self):
-        if not self.knife:
+        if not self.knife or not self.library:
             return
-        for it in self.clips.selectedItems():
+        items = self.clips.selectedItems()
+        if not items:
+            self.status.setText("Sélectionne le ou les clips à supprimer.")
+            return
+        what = f"le clip « {Path(items[0].data(ROLE)).name} »" if len(items) == 1 else f"ces {len(items)} clips"
+        if not confirm(self, "Supprimer", f"Supprimer {what} du couteau « {self.knife} » ?\n"
+                                          "Il ne sera plus proposé dans tes projets."):
+            return
+        for it in items:
             p = it.data(ROLE)
             if p in self.folders[self.knife]:
                 self.folders[self.knife].remove(p)
         self._save_folders()
 
     def delete_knife(self):
-        if not self.knife:
+        if not self.knife or not self.library:
             return
-        if QMessageBox.question(self, "Supprimer", f"Supprimer le couteau « {self.knife} » ?\n"
-                                "(les vidéos restent dans Documents/AuraEdit/Clips)") \
-                != QMessageBox.StandardButton.Yes:
+        n = len(self.folders.get(self.knife, []))
+        if not confirm(self, "Supprimer", f"Supprimer le couteau « {self.knife} » et ses {n} clip(s) ?\n"
+                                          "(les vidéos restent dans Documents/AuraEdit/Clips)"):
             return
         self.folders.pop(self.knife, None)
         self.knife = None
@@ -678,12 +735,22 @@ class ClipsTab(QWidget):
         self.sync()
 
     def remove_selected(self):
-        for it in self.order.selectedItems():
+        items = self.order.selectedItems()
+        if not items:
+            return
+        what = "ce clip" if len(items) == 1 else f"ces {len(items)} clips"
+        if not confirm(self, "Retirer", f"Retirer {what} de l'edit ?\n(il reste dans ta bibliothèque)"):
+            return
+        for it in items:
             self.order.takeItem(self.order.row(it))
         self.sync()
         self.refresh_left()
 
     def clear(self):
+        if not self.order.count() or not confirm(self, "Tout retirer",
+                                                 f"Retirer les {self.order.count()} clips de l'edit ?\n"
+                                                 "(ils restent dans ta bibliothèque)"):
+            return
         self.order.clear()
         self.sync()
         self.refresh_left()
@@ -704,3 +771,10 @@ class ClipsTab(QWidget):
 def proj_safe(name):
     import re
     return re.sub(r'[<>:"/\\|?*]', "_", name)
+
+
+class LibraryTab(ClipsTab):
+    """Catégorie Bibliothèque : « Mes clips »."""
+
+    def __init__(self, project, parent=None):
+        super().__init__(project, parent, library=True)
