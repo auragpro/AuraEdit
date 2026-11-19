@@ -89,6 +89,9 @@ def category_of(path, root=None):
     for cat, words in CATEGORIES.items():
         if any(w in low for w in words):
             return cat
+    parts = low.split("/")
+    if root and len(parts) > 1 and parts[0].strip():
+        return parts[0].strip()          # ton sous-dossier = la catégorie (ex. « jett », « skins »)
     return "autre"
 
 
@@ -213,6 +216,8 @@ class SoundAI:
         self.cat = {}         # ctx -> {catégorie: poids appris}
         self.sound = {}       # clé son -> [aimé, rejeté]
         self.decisions = 0
+        self.rhythm = {}      # écart entre deux sons (en temps) -> nombre de fois
+        self.offset = [0.0, 0]  # décalage moyen par rapport au temps (somme s, nombre)
         self.load()
 
     # ---------------------------------------------------- sauvegarde
@@ -223,19 +228,57 @@ class SoundAI:
             self.cat = {k: dict(v) for k, v in d.get("cat", {}).items()}
             self.sound = {k: list(v) for k, v in d.get("sound", {}).items()}
             self.decisions = int(d.get("decisions", 0))
+            self.rhythm = {k: float(v) for k, v in d.get("rhythm", {}).items()}
+            self.offset = list(d.get("offset", [0.0, 0]))
         except (OSError, ValueError, TypeError, AttributeError):
             pass
 
     def save(self):
         data = {"version": 1, "place": self.place, "cat": self.cat, "sound": self.sound,
-                "decisions": self.decisions}
+                "decisions": self.decisions, "rhythm": self.rhythm, "offset": self.offset}
         tmp = self.path.with_name(self.path.name + ".tmp")
         tmp.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
         os.replace(tmp, self.path)
 
     def reset(self):
         self.place, self.cat, self.sound, self.decisions = {}, {}, {}, 0
+        self.rhythm, self.offset = {}, [0.0, 0]
         self.save()
+
+    # ---------------------------------------------------- rythme et décalage
+    @staticmethod
+    def _bucket(beats):
+        for b in (0.5, 1, 2, 4):
+            if beats < b * 1.4:
+                return str(b)
+        return "8"
+
+    def learn_rhythm(self, times, period):
+        """Retient l'écart habituel entre tes sons (1 temps, 2 temps, 1 mesure...)."""
+        times = sorted(times)
+        for a, b in zip(times, times[1:]):
+            if b - a > 0.05:
+                k = self._bucket((b - a) / period)
+                self.rhythm[k] = self.rhythm.get(k, 0) + 1
+
+    def learn_offset(self, diffs):
+        """Retient si tu poses tes sons un peu avant / après le temps."""
+        for d in diffs:
+            if abs(d) < 0.12:
+                self.offset[0] += d
+                self.offset[1] += 1
+
+    def rhythm_factor(self, gap_beats):
+        total = sum(self.rhythm.values())
+        if total < 5:
+            return 1.0
+        mean = total / len(self.rhythm)
+        n = self.rhythm.get(self._bucket(gap_beats), 0)
+        return float(min(2.5, max(0.25, (n + 0.5) / (mean + 0.5))))
+
+    def time_offset(self):
+        s, n = self.offset
+        return float(np.clip(s / n, -0.08, 0.08)) if n >= 5 else 0.0
 
     # ---------------------------------------------------- probabilités
     def p_place(self, ctx):
@@ -270,8 +313,13 @@ class SoundAI:
         temp = 0.25 + 1.5 * creativity                    # « température » des choix
         sharp = 2 + (1 - creativity) * 18                 # créativité basse = décisions nettes
         out, last_t, last_sound = [], -9.0, None
+        period = 60.0 / analysis.tempo if analysis.tempo else 0.5
+        shift = self.time_offset()
         for m in moments(analysis, use_drops, use_beats, use_voice, use_keywords):
-            p = min(1.0, self.p_place(m.ctx) * density * 2)
+            p = self.p_place(m.ctx) * density * 2
+            if last_t > -9.0 and m.role != "avant_drop":
+                p *= self.rhythm_factor((m.t - last_t) / period)
+            p = min(1.0, p)
             p_eff = 1 / (1 + np.exp(-(p - 0.5) * sharp))
             if rng.random() >= p_eff:
                 continue
@@ -291,7 +339,8 @@ class SoundAI:
                         snd_w[i] *= 0.3
             snd = pool[_pick(rng, snd_w, temp)]
             gain = BASE_GAIN.get(cat, 0.9) * (0.75 + 0.25 * m.weight)
-            out.append(Placement(t=round(m.t, 3), category=cat, sound=snd.path, ctx=m.ctx,
+            t = m.t if cat in ALIGN_PEAK else max(0.0, m.t + shift)
+            out.append(Placement(t=round(t, 3), category=cat, sound=snd.path, ctx=m.ctx,
                                  role=m.role, gain=round(gain, 2)))
             if m.role != "avant_drop":
                 last_t = m.t

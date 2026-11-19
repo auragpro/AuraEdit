@@ -472,6 +472,16 @@ def apply(ai, example):
             ai._bump_place(m.ctx, False)
             negatives += 1
     ai.decisions += negatives
+    # ton rythme (écart entre les sons) et ton décalage par rapport au temps
+    an = example.analysis
+    if an is not None and an.tempo:
+        hits = [d.t for d in kept if d.role != "avant_drop"]
+        ai.learn_rhythm(hits, 60.0 / an.tempo)
+        beats = np.array([b.t for b in an.beats])
+        if beats.size:
+            diffs = [d.t - beats[np.argmin(np.abs(beats - d.t))]
+                     for d in kept if d.category not in sa.ALIGN_PEAK]
+            ai.learn_offset(diffs)
     ai.save()
     return len(kept), negatives
 

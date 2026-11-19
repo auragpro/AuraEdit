@@ -13,9 +13,9 @@ from version import __version__
 from .style import RED, asset
 
 WHATS_NEW = [
-    "Apprendre d'un edit : bouton « Corriger ce son » quand l'IA s'est trompée",
-    "« Photo des sons » : une image de tous les sons utilisés",
-    "L'IA reprend en priorité les sons que tu utilises le plus",
+    "L'IA apprend ton rythme et ton calage depuis tes edits",
+    "Tes sous-dossiers de sons deviennent des catégories",
+    "Apprends plusieurs edits d'affilée sans fermer la fenêtre",
 ]
 
 

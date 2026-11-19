@@ -215,10 +215,18 @@ class LearnFromEditDialog(QDialog):
             QMessageBox.warning(self, "Apprendre d'un edit", f"Impossible d'enregistrer l'IA : {e}")
             return
         kept, empty = self.learned
+        self.total = getattr(self, "total", 0) + kept
+        self.learned = (self.total, empty)
+        self.edits_done = getattr(self, "edits_done", 0) + 1
         QMessageBox.information(self, "Apprendre d'un edit",
                                 f"C'est appris ! {kept} son(s) retenu(s) et {empty} moment(s) où tu n'as rien mis.\n"
-                                f"IA : {self.ai.level()}")
-        self.accept()
+                                f"IA : {self.ai.level()}\n\n"
+                                "Donne-lui un autre edit pour qu'elle s'améliore encore, ou ferme la fenêtre.")
+        self.example = None
+        self.list.clear()
+        self.edit_pick.set_path(None)
+        self.status.setText(f"{self.edits_done} edit(s) appris. Choisis un autre edit (et sa musique).")
+        self._inputs_changed()
 
     def done(self, *a):          # fermeture : on attend la fin de l'écoute
         if self.thread is not None:
