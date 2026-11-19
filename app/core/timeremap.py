@@ -140,47 +140,94 @@ def region_image(path):
     return f[0] if len(f) else None
 
 
-def detect(path, knife=None):
-    """Trouve (début, fin) en secondes : début = plus de mains, fin = couteau sorti.
+KILL_REGION = "crop=iw*0.2:ih*0.2:iw*0.4:ih*0.68,scale=40:24"
 
-    knife = {"image": capture du couteau sorti, "duree": écart connu début -> fin}."""
-    frames = region_frames(path)
-    n = len(frames)
-    if n < 4:
-        raise ValueError("Vidéo illisible ou trop courte.")
-    F = _norm(frames)
-    knife = knife or {}
-    end = None
-    img = knife.get("image")
-    if img and Path(img).is_file():
-        tmpl = region_image(img)
-        if tmpl is not None:
-            sims = F @ _norm(tmpl[None])[0]
-            best = float(sims.max())
-            if best > 0.3:
-                end = int(np.argmax(sims >= best * 0.92))      # 1re fois que le couteau est sorti
-    if end is None:
-        # pas d'image : le plus gros changement dans la zone des mains = sortie du couteau
-        diff = np.abs(np.diff(frames.astype(np.int16), axis=0)).mean(axis=1)
-        k = max(1, FPS // 10)
-        smooth = np.convolve(diff, np.ones(k) / k, mode="same")
-        end = int(min(n - 1, np.argmax(smooth) + int(0.4 * FPS)))
-    duree = knife.get("duree")
-    if duree:
-        start = max(0, end - int(round(duree * FPS)))
-    else:
-        # frame « sans mains » : la moins ressemblante au couteau sorti ET à l'arme d'avant
-        lo = max(0, end - int(1.2 * FPS))
-        before = F[max(0, lo - FPS // 4)]
-        window = F[lo:end]
-        if len(window):
-            score = np.maximum(window @ F[end], window @ before)
-            start = lo + int(np.argmin(score))
+
+def find_kills(path):
+    """Instants (frames) où la bannière de kill apparaît."""
+    p = subprocess.run([audio.ffmpeg_exe(), "-hide_banner", "-loglevel", "error", "-i", str(path), "-an",
+                        "-vf", f"fps={FPS},{KILL_REGION}", "-f", "rawvideo", "-pix_fmt", "gray", "-"],
+                       capture_output=True, creationflags=audio._NO_WINDOW)
+    data = np.frombuffer(p.stdout, dtype=np.uint8)
+    n = len(data) // (40 * 24)
+    if n < 6:
+        return []
+    k = data[:n * 960].reshape(n, 960).astype(np.int16)
+    d = np.zeros(n)
+    d[2:] = np.abs(k[2:] - k[:-2]).mean(axis=1)
+    med = np.median(d)
+    mad = np.median(np.abs(d - med)) + 1e-6
+    thr = max(med + 6 * mad, med + 4)
+    kills, last = [], -FPS
+    for i in np.nonzero(d > thr)[0]:
+        if i - last > FPS // 2:              # une bannière = un kill (on ignore la suite de l'animation)
+            kills.append(int(i))
+        last = i
+    return kills
+
+
+class Analysis:
+    """Résultat de l'analyse d'un clip : kills trouvés + keyframes pour le kill choisi."""
+
+    def __init__(self, path, knife=None):
+        self.knife = knife or {}
+        self.frames = region_frames(path)
+        self.n = len(self.frames)
+        if self.n < 4:
+            raise ValueError("Vidéo illisible ou trop courte.")
+        self.F = _norm(self.frames)
+        self.kills = [k for k in find_kills(path) if k < self.n - 2]
+        self.sims = None
+        img = self.knife.get("image")
+        if img and Path(img).is_file():
+            tmpl = region_image(img)
+            if tmpl is not None:
+                self.sims = self.F @ _norm(tmpl[None])[0]
+        self.length = self.n / FPS
+
+    def keyframes(self, kill_index=-1):
+        """(début, fin) en secondes. début = 1re frame sans le couteau après le kill choisi."""
+        F, n = self.F, self.n
+        if self.kills:
+            kill = self.kills[kill_index]
+            ref = F[max(0, kill - 6):kill + 1].mean(axis=0)          # le couteau au moment du kill
+            ref /= np.linalg.norm(ref) + 1e-6
+            hi = min(n, kill + 3 * FPS)
+            sim = F[kill:hi] @ ref
+            base = float(np.median(F[max(0, kill - 15):kill + 1] @ ref))
+            low = float(sim.min())
+            if base - low > 0.12:
+                thr = base - 0.6 * (base - low)
+                start = kill + int(np.argmax(sim <= thr))
+            else:
+                start = kill + int(np.argmin(sim))
         else:
-            start = max(0, end - FPS // 2)
-    if start >= end:
-        start = max(0, end - FPS // 2)
-    return start / FPS, end / FPS, n / FPS
+            # pas de kill trouvé : le plus gros changement dans la zone des mains
+            diff = np.abs(np.diff(self.frames.astype(np.int16), axis=0)).mean(axis=1)
+            k = max(1, FPS // 10)
+            start = int(np.argmax(np.convolve(diff, np.ones(k) / k, mode="same")))
+            ref, base, low = F[max(0, start - 10)], 1.0, 0.0
+        start = min(start, n - 2)
+
+        duree = self.knife.get("duree")
+        if duree:
+            end = start + int(round(duree * FPS))
+        elif self.sims is not None and start + 2 < n:
+            after = self.sims[start + 2:]
+            end = start + 2 + int(np.argmax(after >= float(after.max()) * 0.92))
+        else:
+            # le couteau revient : la zone redevient comme au moment du kill
+            sim = F[start + 3:min(n, start + 3 * FPS)] @ ref
+            back = np.nonzero(sim >= base - 0.2 * (base - low))[0] if len(sim) else []
+            end = start + 3 + int(back[0]) if len(back) else start + FPS // 2
+        end = min(max(end, start + 1), n - 1)
+        return start / FPS, end / FPS
+
+
+def detect(path, knife=None):
+    a = Analysis(path, knife)
+    s, e = a.keyframes()
+    return s, e, a.length
 
 
 def grab_png(path, t, width=480):

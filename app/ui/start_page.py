@@ -13,9 +13,9 @@ from version import __version__
 from .style import RED, asset
 
 WHATS_NEW = [
+    "Time remap : keyframe 1 trouvée juste après le kill, quand le couteau disparaît",
     "Time remap automatique sur tes clips de couteau, avec tes courbes",
     "Frame blending pour un ralenti fluide",
-    "Kunai et Dash : une main gauche et une main droite, chacune ses vidéos",
 ]
 
 

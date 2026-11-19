@@ -13,7 +13,7 @@ from .style import MUTED, PANEL_2
 
 
 class DetectThread(QThread):
-    done = pyqtSignal(float, float, float)
+    done = pyqtSignal(object)            # tr.Analysis
     failed = pyqtSignal(str)
 
     def __init__(self, path, knife, parent=None):
@@ -22,7 +22,7 @@ class DetectThread(QThread):
 
     def run(self):
         try:
-            self.done.emit(*tr.detect(self.path, self.knife))
+            self.done.emit(tr.Analysis(self.path, self.knife))
         except Exception as e:
             self.failed.emit(str(e) or e.__class__.__name__)
 
@@ -183,8 +183,15 @@ class TimeRemapDialog(QDialog):
         frames = QHBoxLayout()
         frames.addWidget(self.k1)
         frames.addWidget(self.k2)
-        self.status = QLabel("Je cherche les keyframes dans la vidéo...")
+        self.status = QLabel("Je cherche le kill et les keyframes dans la vidéo...")
         self.status.setWordWrap(True)
+        self.analysis = None
+        self.kill = QComboBox()
+        self.kill.setVisible(False)
+        self.kill.currentIndexChanged.connect(self._kill_changed)
+        killrow = QHBoxLayout()
+        killrow.addWidget(self.status, 1)
+        killrow.addWidget(self.kill)
 
         # --- courbes et réglages
         self.c1 = QLineEdit(tr.curve_text(self.cfg["courbe1"]))
@@ -240,7 +247,7 @@ class TimeRemapDialog(QDialog):
         lay.addWidget(title)
         lay.addLayout(krow)
         lay.addLayout(frames)
-        lay.addWidget(self.status)
+        lay.addLayout(killrow)
         lay.addLayout(settings)
         lay.addLayout(brow)
 
@@ -285,11 +292,37 @@ class TimeRemapDialog(QDialog):
         if self.thread is not None and self.thread.isRunning():
             return
         self.b_ok.setEnabled(False)
-        self.status.setText("Je cherche les keyframes dans la vidéo...")
+        self.status.setText("Je cherche le kill et les keyframes dans la vidéo...")
         self.thread = DetectThread(self.path, self._knife_data(), self)
-        self.thread.done.connect(self._ready)
+        self.thread.done.connect(self._analysed)
         self.thread.failed.connect(lambda m: self.status.setText(f"Détection impossible : {m}"))
         self.thread.start()
+
+    def _analysed(self, a):
+        self.analysis = a
+        self.kill.blockSignals(True)
+        self.kill.clear()
+        for i, k in enumerate(a.kills):
+            self.kill.addItem(f"Kill {i + 1} ({k / tr.FPS:.2f} s)")
+        self.kill.setCurrentIndex(len(a.kills) - 1)
+        self.kill.blockSignals(False)
+        self.kill.setVisible(len(a.kills) > 1)
+        start, end = a.keyframes(-1)
+        self._ready(start, end, a.length)
+        if a.kills:
+            self.status.setText(f"{len(a.kills)} kill(s) trouvé(s). Keyframe 1 = 1re frame sans le couteau "
+                                f"après le kill à {a.kills[-1] / tr.FPS:.2f} s. Si c'est mauvais, déplace les "
+                                "curseurs ou choisis un autre kill.")
+        else:
+            self.status.setText("Je n'ai pas trouvé la bannière de kill : vérifie bien les 2 keyframes.")
+
+    def _kill_changed(self, i):
+        if self.analysis is None or i < 0:
+            return
+        start, end = self.analysis.keyframes(i)
+        self._ready(start, end, self.analysis.length)
+        self.status.setText(f"Keyframe 1 = 1re frame sans le couteau après le kill à "
+                            f"{self.analysis.kills[i] / tr.FPS:.2f} s.")
 
     def _ready(self, start, end, length):
         if length is None:
@@ -299,9 +332,6 @@ class TimeRemapDialog(QDialog):
         self.k1.setup(n, int(round(start * tr.FPS)))
         self.k2.setup(n, int(round(end * tr.FPS)))
         self.b_ok.setEnabled(True)
-        if length is not None and not self.status.text().startswith("Time remap déjà"):
-            self.status.setText("Voilà ce que j'ai trouvé. Si c'est mauvais, déplace les curseurs "
-                                "image par image ou clique « Refaire la détection ».")
 
     # ---------------------------------------------------------- réglages
     def _curves(self, *_):
