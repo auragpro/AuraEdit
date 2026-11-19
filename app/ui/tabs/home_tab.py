@@ -45,7 +45,7 @@ class HomeTab(QWidget):
         self.bar.setRange(0, 1000)
         self.bar.hide()
         hint = QLabel("Rendu : intro → clips dans l'ordre → outro, sur ta musique, en 1080p 60 i/s. "
-                      "Les coupes sont gardées pour ajouter les shakes entre chaque clip ensuite.")
+                      "Les shakes (onglet Montage → Shake) sont posés sur chaque coupe.")
         hint.setObjectName("hint")
         hint.setWordWrap(True)
         self.render_status = QLabel()

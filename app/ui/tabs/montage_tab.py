@@ -12,10 +12,11 @@ from .dash_tab import DashTab
 from .intro_tab import IntroTab
 from .kunai_tab import KunaiTab
 from .music_tab import MusicTab
+from .shake_tab import ShakeTab
 
 PARTS = [("Intro", IntroTab), ("Musique", MusicTab), ("Clips", ClipsTab),
-         ("Kunai", KunaiTab), ("Dash", DashTab)]
-ICONS = {"Intro": "🎬", "Musique": "🎵", "Clips": "🔪", "Kunai": "🗡", "Dash": "💨", "Générer": "▶"}
+         ("Kunai", KunaiTab), ("Dash", DashTab), ("Shake", ShakeTab)]
+ICONS = {"Intro": "🎬", "Musique": "🎵", "Clips": "🔪", "Kunai": "🗡", "Dash": "💨", "Shake": "💥", "Générer": "▶"}
 
 TILE_CSS = f"""
 QPushButton {{ background: {PANEL}; border: 2px solid {PANEL_2}; border-radius: 14px;
@@ -52,7 +53,7 @@ class MontageTab(QWidget):
             else:
                 b.clicked.connect(lambda _=False, n=name: self.open(n))
             self.tiles[name] = b
-            grid.addWidget(b, i // 3, i % 3)
+            grid.addWidget(b, i // 4, i % 4)
         gl = QVBoxLayout(grid_page)
         gl.setContentsMargins(32, 28, 32, 28)
         gl.addWidget(page_header("Montage", "Clique sur un carré pour le remplir. Tout est sauvegardé automatiquement."))
@@ -113,6 +114,7 @@ class MontageTab(QWidget):
             "Clips": f"✓ {len(p.clips)} clip(s)" if p.clips else "✗ aucun clip",
             "Kunai": hands(p.kunai),
             "Dash": hands(p.dash),
+            "Shake": self.parts["Shake"].summary() if "Shake" in self.parts else "",
             "Générer": "rendu MP4",
         }
         for n, b in self.tiles.items():

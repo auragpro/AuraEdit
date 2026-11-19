@@ -13,10 +13,9 @@ from version import __version__
 from .style import RED, asset
 
 WHATS_NEW = [
-    "Import FL Studio (.flp) : les sound kills deviennent des repères clip / dash / kunai",
-    "Le logiciel apprend de tes corrections pour reconnaître tes sound kills",
-    "Mes clips : 10 couteaux déjà prêts avec leur image",
-]
+    "Nouveau : Shake « Hit Impulse » sur chaque coupe (IN / OUT 1x à 5x)",
+    "Shake : réglage de la durée (9 crans) et du seed",
+    "Le shake est posé automatiquement quand tu génères l'edit"]
 
 
 def ago(ts):

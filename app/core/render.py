@@ -102,7 +102,26 @@ def render(project, output, progress=None, is_cancelled=None):
         lst.write_text("".join(f"file '{p.as_posix()}'\n" for p in parts), encoding="utf-8")
         if progress:
             progress(len(segs) / steps, "Assemblage et musique...")
-        cmd = [ff, "-y", "-hide_banner", "-f", "concat", "-safe", "0", "-i", str(lst)]
+        cuts = [s["debut"] for s in info[1:]]
+        video = lst
+        from . import shake
+        scfg = getattr(project, "shakes", None)
+        if shake.active(scfg, cuts):
+            base = tmp / "base.mp4"
+            _run([ff, "-y", "-hide_banner", "-f", "concat", "-safe", "0", "-i", str(lst), "-c:v", "copy",
+                  str(base)], is_cancelled)
+            video = tmp / "shake.mp4"
+            try:
+                shake.apply(base, video, cuts, scfg, W, H, FPS, int(t * FPS) + 1, is_cancelled,
+                            (lambda f, txt: progress((len(segs) + f * 0.9) / steps, txt)) if progress else None)
+            except InterruptedError:
+                raise Cancelled()
+            except (RuntimeError, OSError) as e:
+                raise RenderError(f"Shakes impossibles :\n{e}")
+        if video == lst:
+            cmd = [ff, "-y", "-hide_banner", "-f", "concat", "-safe", "0", "-i", str(lst)]
+        else:
+            cmd = [ff, "-y", "-hide_banner", "-i", str(video)]
         music = project.music if project.music and Path(project.music).is_file() else None
         if music:
             cmd += ["-i", music, "-map", "0:v", "-map", "1:a", "-c:a", "aac", "-b:a", "320k", "-t", f"{t:.3f}"]
@@ -110,5 +129,4 @@ def render(project, output, progress=None, is_cancelled=None):
         _run(cmd, is_cancelled)
     if progress:
         progress(1.0, "Terminé")
-    cuts = [s["debut"] for s in info[1:]]
     return {"fichier": str(output), "coupes": cuts, "segments": info, "duree": round(t, 3)}
