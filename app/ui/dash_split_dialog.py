@@ -24,35 +24,53 @@ SW, SH = 320, 180
 
 
 def _feats(path):
-    """Une seule lecture de la vidéo (toutes les frames, 320x180) -> caractéristiques par frame."""
+    """Une seule lecture de la vidéo (toutes les frames, 320x180), en flux : peu de mémoire même pour
+    une compilation de plusieurs Go. Renvoie par frame : netteté, changement de plan, changement de la
+    zone de l'arme / du bas de l'image, et ressemblance de la frame d'avant avec les 7 précédentes."""
     p = subprocess.Popen([audio.ffmpeg_exe(), "-hide_banner", "-loglevel", "error", "-i", str(path), "-an",
                           "-vf", f"scale={SW}:{SH}", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
-                         stdout=subprocess.PIPE, creationflags=audio._NO_WINDOW)
+                         stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, creationflags=audio._NO_WINDOW)
     size = SW * SH * 3
-    sharp, hist, BR, BOT = [], [], [], []
+    sharp, hd, cb, ca, st = [], [], [], [], []
+    prev_h = prev_a = None
+    hist_b = []                                       # 9 dernières zones de l'arme (vecteurs normés)
+
+    def norm(x):
+        x = x.astype(np.float32)
+        x -= x.mean(1, keepdims=True)
+        return x / (np.linalg.norm(x, axis=1, keepdims=True) + 1e-6)
+
     while True:
-        buf = p.stdout.read(size * 240)
+        buf = p.stdout.read(size * 120)
         if not buf:
             break
         m = len(buf) // size
+        if m == 0:
+            break
         f = np.frombuffer(buf[:m * size], np.uint8).reshape(m, SH, SW, 3)
         g = f.astype(np.float32).mean(axis=3)
         c = g[:, int(SH * .15):int(SH * .75), int(SW * .1):int(SW * .9)]
-        sharp.append(np.abs(np.diff(c, axis=2)).mean((1, 2)) + np.abs(np.diff(c, axis=1)).mean((1, 2)))
+        sharp.extend(np.abs(np.diff(c, axis=2)).mean((1, 2)) + np.abs(np.diff(c, axis=1)).mean((1, 2)))
         q = (f[:, ::4, ::4] // 32).astype(np.int32)
         idx = (q[..., 0] * 64 + q[..., 1] * 8 + q[..., 2]).reshape(m, -1)
-        h = np.stack([np.bincount(r, minlength=512) for r in idx]).astype(np.float32)
-        hist.append(h / h.sum(1, keepdims=True))
-        br = f[:, int(SH * .5)::3, int(SW * .55)::3].reshape(m, -1).astype(np.float32)
-        bot = f[:, int(SH * .58)::3, ::3].reshape(m, -1).astype(np.float32)
-        for arr, out in ((br, BR), (bot, BOT)):
-            arr -= arr.mean(1, keepdims=True)
-            arr /= np.linalg.norm(arr, axis=1, keepdims=True) + 1e-6
-            out.append(arr)
+        H = np.stack([np.bincount(r, minlength=512) for r in idx]).astype(np.float32)
+        H /= H.sum(1, keepdims=True)
+        B = norm(f[:, int(SH * .5)::3, int(SW * .55)::3].reshape(m, -1))
+        A = norm(f[:, int(SH * .58)::3, ::3].reshape(m, -1))
+        for i in range(m):
+            hd.append(1.0 if prev_h is None else float(0.5 * np.abs(H[i] - prev_h).sum()))
+            ca.append(1.0 if prev_a is None else float(A[i] @ prev_a))
+            cb.append(1.0 if not hist_b else float(B[i] @ hist_b[-1]))
+            # pour la frame i : ressemblance de la frame i-1 avec les frames i-8..i-2
+            st.append([float(hist_b[-1] @ v) for v in hist_b[:-1]] if len(hist_b) >= 2 else [])
+            prev_h, prev_a = H[i], A[i]
+            hist_b.append(B[i])
+            if len(hist_b) > 8:
+                hist_b.pop(0)
     p.wait()
     if not sharp:
         return None
-    return np.concatenate(sharp), np.concatenate(hist), np.concatenate(BR), np.concatenate(BOT)
+    return np.array(sharp, np.float32), np.array(hd), np.array(cb), np.array(ca), st
 
 
 def _detect(path, sfps):
@@ -62,36 +80,33 @@ def _detect(path, sfps):
     r = _feats(path)
     if r is None:
         return [], 0
-    s, h, b, a = r
+    s, d, cb, ca, st = r
     n = len(s)
-    d = np.zeros(n)
-    d[1:] = 0.5 * np.abs(np.diff(h, axis=0)).sum(1)
     cuts = [0]
     for i in range(1, n):
         if d[i] > 0.3 and i - cuts[-1] > 20:
             cuts.append(i)
     seg_start = np.zeros(n, int)
+    nxt_cut = np.full(n, n)
     k = 0
     for i in range(n):
         while k + 1 < len(cuts) and cuts[k + 1] <= i:
             k += 1
         seg_start[i] = cuts[k]
-    cb = np.ones(n)
-    ca = np.ones(n)
-    cb[1:] = (b[1:] * b[:-1]).sum(1)
-    ca[1:] = (a[1:] * a[:-1]).sum(1)
+        nxt_cut[i] = cuts[k + 1] if k + 1 < len(cuts) else n
     refr = int(0.9 * sfps)
     out, last = [], -10 ** 9
     for j in range(8, n - 2):
         a0 = seg_start[j]
-        nxt = next((c for c in cuts if c > j), n)
-        if cb[j] > 0.995 or j - a0 < 4 or nxt - j < 6:      # doublon / trop près d'un changement de clip
+        if cb[j] > 0.995 or j - a0 < 4 or nxt_cut[j] - j < 6:   # doublon / trop près d'un changement de plan
             continue
         sr = s[j] / (np.median(s[max(a0, j - 6):j]) + 1e-6)
         if sr >= 0.93 or not (cb[j] < 0.65 or ca[j] < 0.8):
             continue
-        st = float(np.median(b[max(a0, j - 8):j - 1] @ b[j - 1])) if j - 1 > a0 else 1.0
-        if st < 0.25:                 # juste avant, l'image bougeait déjà (dash déjà commencé)
+        # frames j-8..j-2 qui sont dans le même plan
+        vals = [v for t, v in zip(range(j - 1 - len(st[j]), j - 1), st[j]) if t >= a0]
+        stab = float(np.median(vals)) if vals else 1.0
+        if stab < 0.25:                    # juste avant, l'image bougeait déjà (dash déjà commencé)
             continue
         if a0 > last or j - last > refr:
             out.append(j)
@@ -149,17 +164,17 @@ class ExportThread(QThread):
                 num += 1
                 target = self.folder / f"dash{num}.mp4"
                 self.progress.emit(int(100 * i / len(self.cuts)), f"Export de {target.name}...")
-                # coupe au numéro de frame exact (trim), même frame que celle vue dans l'aperçu
+                # coupe à la frame exacte : -ss juste avant la frame fa (même méthode que l'aperçu, donc
+                # même frame), puis exactement fb-fa frames. Rapide même au milieu d'une longue vidéo.
                 fa = int(round(a * self.fps))
-                fb = int(round(b * self.fps)) if i + 1 < len(self.cuts) else 10 ** 9
-                ta, tb = fa / self.fps, (fb / self.fps if fb < 10 ** 9 else self.length + 1)
-                p = subprocess.run([audio.ffmpeg_exe(), "-y", "-hide_banner", "-loglevel", "error",
-                                    "-i", self.path,
-                                    "-vf", f"trim=start_frame={fa}:end_frame={fb},setpts=PTS-STARTPTS",
-                                    "-af", f"atrim=start={ta:.6f}:end={tb:.6f},asetpts=PTS-STARTPTS",
-                                    "-c:v", "libx264", "-preset", "medium", "-crf", "12",
-                                    "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "320k", str(target)],
-                                   capture_output=True, creationflags=audio._NO_WINDOW)
+                fb = int(round(b * self.fps)) if i + 1 < len(self.cuts) else None
+                cmd = [audio.ffmpeg_exe(), "-y", "-hide_banner", "-loglevel", "error",
+                       "-ss", f"{max(0.0, (fa - 0.3) / self.fps):.6f}", "-i", self.path]
+                if fb is not None:
+                    cmd += ["-frames:v", str(max(1, fb - fa)), "-t", f"{(fb - fa) / self.fps:.6f}"]
+                cmd += ["-c:v", "libx264", "-preset", "medium", "-crf", "12",
+                        "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "320k", str(target)]
+                p = subprocess.run(cmd, capture_output=True, creationflags=audio._NO_WINDOW)
                 if p.returncode != 0:
                     raise ValueError(p.stderr.decode("utf-8", "replace")[-400:])
                 out.append(str(target))
@@ -176,8 +191,8 @@ class DashSplitDialog(QDialog):
         self.path, self.length, self.fps = None, 0.0, 60.0
         self.cuts, self.result = [], []
         self.thread = None
-        info = QLabel("Choisis ta compilation : je repère chaque bannière de kill puis la 1re frame du dash "
-                      "qui suit. Vérifie CHAQUE coupe (clique-la dans la liste) : corrige avec ◀ -1 / +1 ▶ puis "
+        info = QLabel("Choisis ta compilation : je repère la 1re frame de chaque dash (la frame où l'arme "
+                      "disparaît et où la main du dash apparaît). Vérifie CHAQUE coupe (clique-la dans la liste) : corrige avec ◀ -1 / +1 ▶ puis "
                       "« ↔ Déplacer ici », ajoute une coupe oubliée avec « ➕ Coupe ici », ou supprime une coupe "
                       "en trop. Chaque dash est ensuite enregistré à part : dash1, dash2...")
         info.setWordWrap(True)

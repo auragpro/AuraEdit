@@ -13,9 +13,9 @@ from version import __version__
 from .style import RED, asset
 
 WHATS_NEW = [
-    "Dash : coupe sur la frame où l'arme disparaît",
-    "Réglé sur ta compil : 48 dash sur 49 à la frame exacte",
-    "Les tirs ne sont plus pris pour des dash"]
+    "Couper une compil de dash : marche sur les grosses compils",
+    "Export des dash bien plus rapide, toujours à la frame près",
+    "Les dash coupés s'ajoutent direct dans la partie Dash"]
 
 
 def ago(ts):

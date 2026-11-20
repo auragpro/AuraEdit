@@ -131,14 +131,27 @@ class HandsTab(QWidget):
         self._refresh()
 
     def split_compilation(self):
+        from PyQt6.QtWidgets import QMessageBox
         from ..dash_split_dialog import DashSplitDialog
         dlg = DashSplitDialog(self)
-        if dlg.exec() and dlg.result:
-            from PyQt6.QtWidgets import QMessageBox
-            QMessageBox.information(self, "Compilation coupée",
-                                    f"{len(dlg.result)} dash enregistré(s) à part (dash1, dash2...).\n"
-                                    "Tu les trouves dans « Mes clips » → Dash. Ajoute-les ici dans la main voulue "
-                                    "avec « Ajouter des vidéos... ».")
+        if not (dlg.exec() and dlg.result):
+            return
+        box = QMessageBox(self)
+        box.setWindowTitle("Compilation coupée")
+        box.setText(f"{len(dlg.result)} dash enregistré(s) à part (dash1, dash2...) dans « Mes clips » → Dash.\n\n"
+                    "Je les ajoute aussi ici, dans quelle main ?")
+        b_g = box.addButton("Main gauche", QMessageBox.ButtonRole.AcceptRole)
+        b_d = box.addButton("Main droite", QMessageBox.ButtonRole.AcceptRole)
+        box.addButton("Ne pas ajouter", QMessageBox.ButtonRole.RejectRole)
+        box.exec()
+        side = {b_g: "gauche", b_d: "droite"}.get(box.clickedButton())
+        if side:
+            current = set(getattr(self.settings, side))
+            for f in dlg.result:
+                if f not in current:
+                    self.lists[side].addItem(self._item(f))
+                    current.add(f)
+            self._sync()
 
     @property
     def settings(self):

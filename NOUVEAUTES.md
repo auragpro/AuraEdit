@@ -1,3 +1,10 @@
+## Nouveautés de la version 0.8.4
+
+- **Couper une compilation de dash marche sur les grosses compils** (plusieurs Go) :
+  - La détection lit la vidéo en flux et n'utilise presque plus de mémoire.
+  - L'export de chaque dash va directement au bon endroit de la vidéo au lieu de tout relire depuis le début : c'est beaucoup plus rapide, et toujours à la frame exacte.
+- **Après la coupe, les dash peuvent être ajoutés directement dans la partie Dash** : l'app te demande Main gauche, Main droite ou Ne pas ajouter.
+
 ## Nouveautés de la version 0.8.3
 
 - **Détection des dash refaite et réglée sur ta vraie compilation** (« compil dash AURA FARM ») :
