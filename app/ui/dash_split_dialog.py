@@ -190,11 +190,14 @@ class DashSplitDialog(QDialog):
         self.resize(1000, 680)
         self.path, self.length, self.fps = None, 0.0, 60.0
         self.cuts, self.result = [], []
+        self.sides = {}                    # coupe -> "gauche" / "droite" (main où le dash va dans la partie Dash)
+        self.result_sides = {}
         self.thread = None
         info = QLabel("Choisis ta compilation : je repère la 1re frame de chaque dash (la frame où l'arme "
                       "disparaît et où la main du dash apparaît). Vérifie CHAQUE coupe (clique-la dans la liste) : corrige avec ◀ -1 / +1 ▶ puis "
                       "« ↔ Déplacer ici », ajoute une coupe oubliée avec « ➕ Coupe ici », ou supprime une coupe "
-                      "en trop. Chaque dash est ensuite enregistré à part : dash1, dash2...")
+                      "en trop. Pour chaque dash, choisis où il va dans la partie Dash : ⬅ Main gauche (touche G) "
+                      "ou Main droite ➡ (touche D), l'app passe ensuite au dash suivant. Chaque dash est ensuite enregistré à part : dash1, dash2...")
         info.setWordWrap(True)
         b_open = QPushButton("Choisir la compilation...")
         b_open.clicked.connect(self.open_video)
@@ -218,6 +221,16 @@ class DashSplitDialog(QDialog):
         b_move.clicked.connect(self.move_cut)
         b_del = QPushButton("🗑 Supprimer la coupe")
         b_del.clicked.connect(self.del_cut)
+        b_g, b_d, b_n = QPushButton("⬅ Main gauche (G)"), QPushButton("Main droite (D) ➡"), QPushButton("Pas dans Dash")
+        b_g.clicked.connect(lambda: self.set_side("gauche"))
+        b_d.clicked.connect(lambda: self.set_side("droite"))
+        b_n.clicked.connect(lambda: self.set_side(None))
+        from PyQt6.QtGui import QShortcut, QKeySequence
+        QShortcut(QKeySequence("G"), self, activated=lambda: self.set_side("gauche"))
+        QShortcut(QKeySequence("D"), self, activated=lambda: self.set_side("droite"))
+        side_row = QHBoxLayout()
+        for w in (b_g, b_d, b_n):
+            side_row.addWidget(w)
         self.bar = QProgressBar()
         self.bar.setVisible(False)
         self.b_go = QPushButton("✂ Couper et enregistrer les dash")
@@ -232,6 +245,8 @@ class DashSplitDialog(QDialog):
         right.addWidget(self.list, 1)
         for b in (b_add, b_move, b_del):
             right.addWidget(b)
+        right.addWidget(QLabel("Envoyer le dash sélectionné dans la partie Dash :"))
+        right.addLayout(side_row)
         body = QHBoxLayout()
         body.addLayout(left, 2)
         body.addLayout(right, 1)
@@ -264,6 +279,7 @@ class DashSplitDialog(QDialog):
     def _found(self, starts, length, kills):
         self.length, self.fps = length, float(tr.source_fps(self.path))
         self.cuts = list(starts)
+        self.sides = {}
         self.slider.setRange(0, max(1, int(length * self.fps) - 1))
         self.slider.setEnabled(True)
         self._fill()
@@ -274,7 +290,8 @@ class DashSplitDialog(QDialog):
         self.cuts.sort()
         self.list.clear()
         for i, c in enumerate(self.cuts):
-            it = QListWidgetItem(f"dash {i + 1}  —  {fmt(c)}  (frame {int(round(c * self.fps))})")
+            side = {"gauche": "⬅ gauche", "droite": "droite ➡"}.get(self.sides.get(c), "—")
+            it = QListWidgetItem(f"dash {i + 1}  —  {fmt(c)}  (frame {int(round(c * self.fps))})   [{side}]")
             it.setData(ROLE, c)
             self.list.addItem(it)
         self.b_go.setEnabled(bool(self.cuts))
@@ -301,14 +318,41 @@ class DashSplitDialog(QDialog):
     def move_cut(self):
         it = self.list.currentItem()
         if it is not None:
-            self.cuts = [c for c in self.cuts if c != it.data(ROLE)] + [self._here()]
+            old, new = it.data(ROLE), self._here()
+            self.cuts = [c for c in self.cuts if c != old] + [new]
+            if old in self.sides:
+                self.sides[new] = self.sides.pop(old)
             self._fill()
+            self._select(new)
 
     def del_cut(self):
         it = self.list.currentItem()
         if it is not None:
             self.cuts = [c for c in self.cuts if c != it.data(ROLE)]
             self._fill()
+
+    def _select(self, c):
+        for i in range(self.list.count()):
+            if self.list.item(i).data(ROLE) == c:
+                self.list.setCurrentRow(i)
+                return
+
+    def set_side(self, side):
+        it = self.list.currentItem()
+        if it is None:
+            return
+        c = it.data(ROLE)
+        if side:
+            self.sides[c] = side
+        else:
+            self.sides.pop(c, None)
+        row = self.list.currentRow()
+        self._fill()
+        if row + 1 < self.list.count():                 # passe direct au dash suivant
+            self.list.setCurrentRow(row + 1)
+            self._goto(self.list.item(row + 1).data(ROLE))
+        else:
+            self.list.setCurrentRow(row)
 
     def export(self):
         if not self.cuts or self._busy():
@@ -324,6 +368,8 @@ class DashSplitDialog(QDialog):
         self.thread.start()
 
     def _exported(self, files):
+        cuts = sorted(self.cuts)
+        self.result_sides = {f: self.sides.get(c) for f, c in zip(files, cuts)}
         folders = proj.load_clip_folders()
         lst = folders.setdefault("Dash", [])
         lst += [f for f in files if f not in lst]

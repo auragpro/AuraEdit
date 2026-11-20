@@ -13,9 +13,9 @@ from version import __version__
 from .style import RED, asset
 
 WHATS_NEW = [
-    "Couper une compil de dash : marche sur les grosses compils",
-    "Export des dash bien plus rapide, toujours à la frame près",
-    "Les dash coupés s'ajoutent direct dans la partie Dash"]
+    "Compil de dash : choisis gauche ou droite pour chaque dash",
+    "Touches G / D, passage auto au dash suivant",
+    "Chaque dash coupé va direct dans la partie Dash"]
 
 
 def ago(ts):

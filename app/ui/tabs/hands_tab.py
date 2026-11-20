@@ -136,22 +136,20 @@ class HandsTab(QWidget):
         dlg = DashSplitDialog(self)
         if not (dlg.exec() and dlg.result):
             return
-        box = QMessageBox(self)
-        box.setWindowTitle("Compilation coupée")
-        box.setText(f"{len(dlg.result)} dash enregistré(s) à part (dash1, dash2...) dans « Mes clips » → Dash.\n\n"
-                    "Je les ajoute aussi ici, dans quelle main ?")
-        b_g = box.addButton("Main gauche", QMessageBox.ButtonRole.AcceptRole)
-        b_d = box.addButton("Main droite", QMessageBox.ButtonRole.AcceptRole)
-        box.addButton("Ne pas ajouter", QMessageBox.ButtonRole.RejectRole)
-        box.exec()
-        side = {b_g: "gauche", b_d: "droite"}.get(box.clickedButton())
-        if side:
+        added = 0
+        for side in ("gauche", "droite"):
+            files = [f for f, sd in dlg.result_sides.items() if sd == side]
             current = set(getattr(self.settings, side))
-            for f in dlg.result:
+            for f in files:
                 if f not in current:
                     self.lists[side].addItem(self._item(f))
                     current.add(f)
+                    added += 1
+        if added:
             self._sync()
+        QMessageBox.information(self, "Compilation coupée",
+                                f"{len(dlg.result)} dash enregistré(s) (dash1, dash2...) dans « Mes clips » → Dash.\n"
+                                f"{added} ajouté(s) ici dans la main choisie.")
 
     @property
     def settings(self):

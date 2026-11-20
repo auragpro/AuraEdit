@@ -1,3 +1,11 @@
+## Nouveautés de la version 0.8.5
+
+- **Couper une compilation de dash : chaque dash va directement dans la partie Dash, dans la main que tu choisis.**
+  - Sélectionne un dash dans la liste puis clique **⬅ Main gauche** (touche **G**) ou **Main droite ➡** (touche **D**).
+  - L'app passe tout de suite au dash suivant : tu peux tout trier au clavier.
+  - La main choisie s'affiche à côté de chaque dash. **Pas dans Dash** le laisse seulement dans « Mes clips ».
+  - Après « ✂ Couper et enregistrer », chaque dash est ajouté dans sa main.
+
 ## Nouveautés de la version 0.8.4
 
 - **Couper une compilation de dash marche sur les grosses compils** (plusieurs Go) :
