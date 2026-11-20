@@ -13,7 +13,7 @@ from version import __version__
 from .style import RED, asset
 
 WHATS_NEW = [
-    "Reproduire : edits découpés gardés + ajout de clips",
+    "Time remap : colle un code de courbe Flow",
     "Fond vert : bords propres, 60 i/s, passage au choix",
     "Fond vert en continuité + Fondu / Dissolve Luma"]
 

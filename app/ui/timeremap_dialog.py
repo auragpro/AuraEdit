@@ -238,6 +238,22 @@ class TimeRemapDialog(QDialog):
         self.c2 = QLineEdit(tr.curve_text(self.cfg["courbe2"]))
         for e in (self.c1, self.c2):
             e.textChanged.connect(self._curves)
+            e.setPlaceholderText("code de courbe, ex. .69,0,.31,1")
+        # --- code de courbe comme dans Flow (After Effects) : on colle, on choisit où l'appliquer
+        self.flow = QLineEdit()
+        self.flow.setPlaceholderText("Colle un code Flow : .69,0,.31,1  ou  cubic-bezier(0.69, 0, 0.31, 1)")
+        self.flow.textChanged.connect(self._flow_check)
+        self.flow_state = QLabel("")
+        self.flow_state.setObjectName("hint")
+        b_paste = QPushButton("📋 Coller")
+        b_paste.setToolTip("Colle le code de courbe copié dans Flow (presse-papiers).")
+        b_paste.clicked.connect(self._flow_paste)
+        self.flow_btns = []
+        for label, which in (("→ Courbe 1", 1), ("→ Courbe 2", 2), ("→ Les deux", 3)):
+            b = QPushButton(label)
+            b.setEnabled(False)
+            b.clicked.connect(lambda _=False, w=which: self._flow_apply(w))
+            self.flow_btns.append(b)
         self.slow = QDoubleSpinBox()
         self.slow.setRange(0.1, 10)
         self.slow.setSingleStep(0.1)
@@ -256,6 +272,14 @@ class TimeRemapDialog(QDialog):
         grid = QGridLayout()
         grid.addWidget(QLabel("Courbe 1 (keyframe 1 → 2)"), 0, 0)
         grid.addWidget(self.c1, 0, 1)
+        frow = QHBoxLayout()
+        frow.addWidget(self.flow, 1)
+        frow.addWidget(b_paste)
+        for b in self.flow_btns:
+            frow.addWidget(b)
+        grid.addWidget(QLabel("Code Flow"), 6, 0)
+        grid.addLayout(frow, 6, 1)
+        grid.addWidget(self.flow_state, 7, 1)
         grid.addWidget(QLabel("Courbe 2 (keyframe 2 → 3, reverse)"), 1, 0)
         grid.addWidget(self.c2, 1, 1)
         grid.addWidget(QLabel("Durée du ralenti (1 → 2)"), 2, 0)
@@ -489,6 +513,28 @@ class TimeRemapDialog(QDialog):
         self.slow.setEnabled(not on)
         if on:
             self.slow.setValue(max(0.1, self.gap - self.back.value() / tr.FPS))
+
+    def _flow_check(self, *_):
+        c = tr.parse_curve(self.flow.text())
+        for b in self.flow_btns:
+            b.setEnabled(c is not None)
+        self.flow_state.setText("" if not self.flow.text().strip() else
+                                (f"✓ courbe lue : {tr.curve_text(c)}" if c else
+                                 "Code illisible : il faut 4 nombres (ex. .69,0,.31,1)."))
+
+    def _flow_paste(self):
+        from PyQt6.QtWidgets import QApplication
+        self.flow.setText(QApplication.clipboard().text().strip())
+
+    def _flow_apply(self, which):
+        c = tr.parse_curve(self.flow.text())
+        if not c:
+            return
+        if which & 1:
+            self.c1.setText(tr.curve_text(c))
+        if which & 2:
+            self.c2.setText(tr.curve_text(c))
+        self.flow_state.setText(f"✓ appliquée à {'la courbe 1' if which == 1 else 'la courbe 2' if which == 2 else 'les deux courbes'}.")
 
     def _curves(self, *_):
         self.preview.set_curves(tr.parse_curve(self.c1.text()), tr.parse_curve(self.c2.text()))

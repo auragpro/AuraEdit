@@ -1,3 +1,9 @@
+## Nouveautés de la version 0.9.3
+
+- **Time remap : code de courbe comme dans Flow (After Effects).** Nouveau champ « Code Flow » : colle le code copié dans Flow (bouton 📋 Coller), puis applique-le à la courbe 1, à la courbe 2 ou aux deux.
+  - Formats acceptés : `.69,0,.31,1`, `cubic-bezier(0.69, 0, 0.31, 1)`, `[0.69,0,0.31,1]`, `0,69 ; 0 ; 0,31 ; 1`.
+  - Les champs Courbe 1 / Courbe 2 acceptent aussi ces codes directement (avant, `.69` était mal lu).
+
 ## Nouveautés de la version 0.9.2
 
 - **Reproduire : tes edits découpés sont gardés.** Une liste « Edits déjà découpés » garde les transitions ET les clips choisis de chaque edit. Double-clic (ou « Reprendre cet edit ») pour continuer là où tu t'étais arrêté, sans refaire l'analyse. Rouvrir le même edit le reprend tout seul.

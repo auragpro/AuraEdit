@@ -132,11 +132,20 @@ def knife_dir():
 
 
 def parse_curve(text):
-    """'0.39, 0.59, 0.26, 1' -> [0.39, 0.59, 0.26, 1.0] (None si illisible)."""
-    nums = re.findall(r"-?\d+(?:[.,]\d+)?", text or "")
+    """Code de courbe -> [x1, y1, x2, y2] (None si illisible). Accepte les codes copiés de Flow
+    (After Effects) et le CSS : '.69,0,.31,1', 'cubic-bezier(0.69, 0, 0.31, 1)', '[0.69,0,0.31,1]',
+    '0,69 ; 0 ; 0,31 ; 1' (virgule décimale à la française)."""
+    t = (text or "").replace("cubic-bezier", "")
+    nums = re.findall(r"-?(?:\d+\.\d*|\.\d+|\d+)", t)
+    if len(nums) != 4 and ";" in t:                 # 0,69 ; 0 ; 0,31 ; 1
+        nums = [n.strip().replace(",", ".") for n in t.split(";") if n.strip()]
+        nums = [re.sub(r"[^0-9.\-]", "", n) for n in nums]
     if len(nums) != 4:
         return None
-    vals = [float(n.replace(",", ".")) for n in nums]
+    try:
+        vals = [float(n) for n in nums]
+    except ValueError:
+        return None
     vals[0] = min(max(vals[0], 0.0), 1.0)
     vals[2] = min(max(vals[2], 0.0), 1.0)
     return vals
