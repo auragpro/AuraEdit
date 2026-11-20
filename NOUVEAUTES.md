@@ -1,3 +1,12 @@
+## Nouveautés de la version 0.8.8
+
+- **🤖 Edit auto dans « Reproduire un edit »** : un bouton remplit tous les plans d'un coup.
+  - L'app regarde chaque plan de l'edit fini et reconnaît ce que c'est en le comparant à tes clips : quel couteau (Exo, Kuronami...), un kunai, un dash, un dash back, un dismiss.
+  - Les dash, kunai, etc. gardent **le même côté** (main gauche / main droite) que dans l'edit.
+  - Si tu n'as plus de clip libre pour ce couteau, l'app prend un clip du **couteau qui ressemble le plus**.
+  - Les clips avec le time remap déjà fait passent en premier, sans mettre deux fois le même.
+  - Tu peux tout vérifier plan par plan et re-cliquer un couteau pour changer.
+
 ## Nouveautés de la version 0.8.7
 
 - **Superposer une vidéo sur un clip, avec fond vert enlevé** (dans « Reproduire un edit », quand tu places tes clips).

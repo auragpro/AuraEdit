@@ -40,6 +40,28 @@ class CutsThread(QThread):
             self.failed.emit(str(e))
 
 
+class AutoThread(QThread):
+    """Analyse de l'edit pour l'edit auto (en arrière-plan)."""
+    step = pyqtSignal(float, str)
+    done = pyqtSignal(list)
+    failed = pyqtSignal(str)
+
+    def __init__(self, edit, bounds, classes, parent=None):
+        super().__init__(parent)
+        self.edit, self.bounds, self.classes = edit, bounds, classes
+
+    def run(self):
+        try:
+            from app.core import auto_match
+            from app.core.render import duration
+            durs = {c: duration(c) for k in self.classes.values() for c in k["clips"][:5]}
+            res = auto_match.analyse(self.edit, self.bounds, self.classes, tr.clip_remaps(), durs,
+                                     lambda f, t: self.step.emit(f, t))
+            self.done.emit(res)
+        except Exception as e:                          # noqa: BLE001
+            self.failed.emit(str(e))
+
+
 class Preview(QLabel):
     """Image de la vidéo à un instant (mise à jour un peu après le dernier changement)."""
 
@@ -228,6 +250,11 @@ class ReproduceDialog(QDialog):
         b_skip.clicked.connect(self._skip)
         self.b_go = QPushButton("Plan suivant  →")
         self.b_go.setObjectName("primary")
+        self.b_auto = QPushButton("🤖 Edit auto : remplir tous les plans")
+        self.b_auto.setToolTip("J'analyse chaque plan de l'edit (quel couteau, kunai, dash gauche/droite...) "
+                               "et je mets un de tes clips qui correspond.")
+        self.b_auto.clicked.connect(self.auto_edit)
+        self.auto_status = QLabel("")
         self.b_go.clicked.connect(self._next_seg)
         views = QHBoxLayout()
         lv, rv = QVBoxLayout(), QVBoxLayout()
@@ -245,7 +272,11 @@ class ReproduceDialog(QDialog):
         row.addWidget(b_skip)
         row.addWidget(self.b_go)
         lay = QVBoxLayout(w)
-        lay.addWidget(self.seg_title)
+        trow = QHBoxLayout()
+        trow.addWidget(self.seg_title, 1)
+        trow.addWidget(self.auto_status)
+        trow.addWidget(self.b_auto)
+        lay.addLayout(trow)
         lay.addWidget(info)
         lay.addLayout(views)
         lay.addWidget(self.grid, 1)
@@ -330,6 +361,83 @@ class ReproduceDialog(QDialog):
             else:
                 self.overlays.pop(self.seg, None)
             self._show_pick()
+
+    # ------------------------------------------------------------ edit auto
+    def _classes(self):
+        classes = {}
+        for name, clips, img in self._pools():
+            attr = proj.SPECIAL_ATTR.get(name)
+            if not attr:
+                classes[name] = {"clips": clips, "image": img, "pool": name, "special": False}
+                continue
+            st = getattr(self.project, attr, None)
+            rest = list(clips)
+            for side in ("gauche", "droite"):
+                part = [c for c in clips if st and c in getattr(st, side, [])]
+                rest = [c for c in rest if c not in part]
+                if part:
+                    classes[f"{name}|{side}"] = {"clips": part, "image": None, "pool": name, "special": True}
+            if rest:
+                classes[name] = {"clips": rest, "image": None, "pool": name, "special": True}
+        return classes
+
+    def auto_edit(self):
+        if self.thread is not None and self.thread.isRunning():
+            return
+        self.auto_cls = self._classes()
+        if not self.auto_cls:
+            self.auto_status.setText("Aucun clip dans « Mes clips ».")
+            return
+        self.b_auto.setEnabled(False)
+        self.auto_status.setText("Analyse...")
+        self.thread = AutoThread(self.path, list(self.bounds), self.auto_cls, self)
+        self.thread.step.connect(lambda f, t: self.auto_status.setText(f"{t} {int(f * 100)} %"))
+        self.thread.done.connect(self._auto_done)
+        self.thread.failed.connect(lambda m: (self.auto_status.setText(f"Erreur : {m}"),
+                                              self.b_auto.setEnabled(True)))
+        self.thread.start()
+
+    def _auto_done(self, ranks):
+        self.b_auto.setEnabled(True)
+        saved = tr.clip_remaps()
+        used = set()
+
+        def take(key):
+            clips = self.auto_cls[key]["clips"]
+            free = [c for c in clips if c not in used]
+            if not free:
+                return None
+            pool = [c for c in free if c in saved] or free     # time remap déjà fait d'abord
+            return random.choice(pool)
+
+        changed, other = 0, 0
+        for i, ranked in enumerate(ranks):
+            if i >= len(self.choices) or not ranked:
+                continue
+            best = ranked[0]
+            info = self.auto_cls[best]
+            pick, key = None, best
+            if info["special"]:
+                pick = take(best) or random.choice(info["clips"])          # même catégorie, même main
+            else:
+                for k in ranked:                                         # sinon le couteau le plus proche
+                    if not self.auto_cls[k]["special"]:
+                        pick = take(k)
+                        if pick:
+                            key = k
+                            break
+                if not pick:
+                    pick = random.choice(info["clips"])
+                elif key != best:
+                    other += 1
+            used.add(pick)
+            self.choices[i] = (self.auto_cls[key]["pool"], pick)
+            changed += 1
+        msg = f"✓ {changed} plan(s) remplis"
+        if other:
+            msg += f" ({other} avec un autre couteau, plus de clip libre)"
+        self.auto_status.setText(msg + " — vérifie et re-clique un couteau pour changer.")
+        self._show_seg(0)
 
     def _skip(self):
         self.choices[self.seg] = None

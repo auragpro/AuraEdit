@@ -13,9 +13,9 @@ from version import __version__
 from .style import RED, asset
 
 WHATS_NEW = [
-    "Superposer une vidéo sur un clip (Reproduire un edit)",
-    "Fond vert enlevé proprement, couleur au choix (pipette)",
-    "Suppression du débordement façon After Effects"]
+    "🤖 Edit auto : l'app reconnaît chaque plan de l'edit",
+    "Même couteau, kunai, dash du même côté",
+    "Autre couteau si plus de clip libre"]
 
 
 def ago(ts):
