@@ -1,3 +1,11 @@
+## Nouveautés de la version 0.9.1
+
+- **La durée du ralenti se cale sur les marqueurs de la musique.**
+  - Dans le time remap, la case « Caler sur les marqueurs de la musique » (cochée par défaut) règle le ralenti pour que le clip dure exactement jusqu'au marqueur suivant (ralenti + retour = durée du plan).
+  - Le 1er clip de l'edit va sur le 1er marqueur « clip », le 2e sur le 2e, etc. (pareil pour les kunais).
+  - Au rendu, la durée est recalculée avec les marqueurs actuels : si tu déplaces un marqueur, le ralenti suit.
+  - Décoche la case pour remettre une durée à la main.
+
 ## Nouveautés de la version 0.9.0
 
 - **Edit auto : reconnaissance des plans bien meilleure.**

@@ -107,7 +107,13 @@ def render(project, output, progress=None, is_cancelled=None, export=None):
                 from . import timeremap
                 try:
                     name = vclip.name(path)
-                    timeremap.render(path, float(remap["debut"]), float(remap["fin"]), timeremap.cfg_for(remap), part,
+                    rcfg = timeremap.cfg_for(remap)
+                    if remap.get("marqueur", True):              # durée calée sur les marqueurs de la musique
+                        from . import markers as _mk
+                        gap = _mk.gap_for(project, path)
+                        if gap:
+                            rcfg["duree_ralenti"] = max(0.1, gap - int(rcfg.get("frames_retour", 6)) / timeremap.FPS)
+                    timeremap.render(path, float(remap["debut"]), float(remap["fin"]), rcfg, part,
                                      is_cancelled,
                                      (lambda f, txt, i=i, name=name: progress((i + f) / steps,
                                                                               f"Clip {i + 1}/{len(segs)} — {txt} ({name})"))

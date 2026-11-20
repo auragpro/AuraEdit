@@ -13,7 +13,7 @@ from version import __version__
 from .style import RED, asset
 
 WHATS_NEW = [
-    "Edit auto : flick, kunai et dash bien reconnus",
+    "Ralenti calé sur les marqueurs de la musique",
     "Fond vert : bords propres, 60 i/s, passage au choix",
     "Fond vert en continuité + Fondu / Dissolve Luma"]
 

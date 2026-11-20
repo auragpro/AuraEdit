@@ -28,6 +28,29 @@ def type_of(name):
     return "clip"
 
 
+def gap_for(project, path, kind=None):
+    """Durée du plan de ce clip d'après les marqueurs de la musique : du marqueur du clip au marqueur suivant.
+    Le n-ième clip de l'edit va sur le n-ième marqueur « clip » (pareil pour les kunais). None si inconnu."""
+    ms = sorted((m for m in getattr(project, "markers", None) or [] if "t" in m), key=lambda m: m["t"])
+    if not ms:
+        return None
+    typ = "kunai" if kind == "kunai" else ("clip" if not kind else None)
+    if typ is None:
+        return None
+    order = list(dict.fromkeys(project.clips)) if typ == "clip" else list(project.kunai.videos)
+    if path not in order:
+        return None
+    n = order.index(path)
+    mine = [i for i, m in enumerate(ms) if m.get("type", "clip") == typ]
+    if n >= len(mine):
+        return None
+    i = mine[n]
+    if i + 1 >= len(ms):
+        return None
+    gap = float(ms[i + 1]["t"]) - float(ms[i]["t"])
+    return gap if gap > 0.05 else None
+
+
 def clean(markers, min_gap=0.06):
     """Trie et retire les doublons trop proches."""
     out = []

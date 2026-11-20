@@ -260,10 +260,20 @@ class TimeRemapDialog(QDialog):
         grid.addWidget(self.c2, 1, 1)
         grid.addWidget(QLabel("Durée du ralenti (1 → 2)"), 2, 0)
         grid.addWidget(self.slow, 2, 1)
+        from app.core import markers as mk
+        self.gap = mk.gap_for(project, path, self.kind)
+        self.c_mark = QCheckBox("Caler sur les marqueurs de la musique"
+                                + (f" (plan de {self.gap:.2f} s)" if self.gap else " (aucun marqueur pour ce clip)"))
+        self.c_mark.setEnabled(bool(self.gap))
+        self.c_mark.setChecked(bool(self.gap) and old.get("marqueur", True))
+        self.c_mark.toggled.connect(self._fit_marker)
+        self.back.valueChanged.connect(lambda _: self._fit_marker())
+        grid.addWidget(self.c_mark, 5, 0, 1, 2)
         grid.addWidget(QLabel("Durée du retour (2 → 3)"), 3, 0)
         grid.addWidget(self.back, 3, 1)
         grid.addWidget(QLabel("Frame blending"), 4, 0)
         grid.addWidget(self.blend, 4, 1)
+        self._fit_marker()
         settings = QHBoxLayout()
         settings.addLayout(grid, 1)
         settings.addWidget(self.preview, 1)
@@ -473,6 +483,13 @@ class TimeRemapDialog(QDialog):
         self._fill_presets()
 
     # ---------------------------------------------------------- réglages
+    def _fit_marker(self, *_):
+        """Ralenti = durée du plan (marqueur -> marqueur suivant) moins le retour."""
+        on = self.c_mark.isChecked() and bool(self.gap)
+        self.slow.setEnabled(not on)
+        if on:
+            self.slow.setValue(max(0.1, self.gap - self.back.value() / tr.FPS))
+
     def _curves(self, *_):
         self.preview.set_curves(tr.parse_curve(self.c1.text()), tr.parse_curve(self.c2.text()))
 
@@ -525,7 +542,8 @@ class TimeRemapDialog(QDialog):
             self.cfg["duree_kunai"] = round(end - start, 4)
             tr.save_kunai(self._global_cfg(), self.kind)
             data = {"type": self.kind, "debut": round(start, 4), "fin": round(end, 4),
-                    "ralenti": self.slow.value(), "retour": self.back.value()}
+                    "ralenti": self.slow.value(), "retour": self.back.value(),
+                    "marqueur": self.c_mark.isChecked()}
             self.project.remaps[self.path] = data
             tr.save_clip_remap(self.path, data)
             self.accept()
@@ -539,7 +557,8 @@ class TimeRemapDialog(QDialog):
                 k["image"] = img
         tr.save(self._global_cfg())
         data = {"couteau": name, "debut": round(start, 4), "fin": round(end, 4),
-                "ralenti": self.slow.value(), "retour": self.back.value()}
+                "ralenti": self.slow.value(), "retour": self.back.value(),
+                "marqueur": self.c_mark.isChecked()}
         self.project.remaps[self.path] = data
         tr.save_clip_remap(self.path, data)
         self.accept()
