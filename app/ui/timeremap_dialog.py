@@ -185,7 +185,7 @@ class TimeRemapDialog(QDialog):
         if old.get("retour"):
             self.cfg["frames_retour"] = int(old["retour"])
 
-        title = QLabel(f"Time remap {self.label + ' ' if self.kunai else ''}— {Path(path).name}")
+        title = QLabel(f"Time remap {self.label + ' ' if self.kunai else ''}— {__import__('app.core.vclip', fromlist=['x']).name(path)}")
         title.setObjectName("h1")
 
         # --- couteau

@@ -13,9 +13,9 @@ from version import __version__
 from .style import RED, asset
 
 WHATS_NEW = [
-    "Compil de dash : choisis gauche ou droite pour chaque dash",
-    "Touches G / D, passage auto au dash suivant",
-    "Chaque dash coupé va direct dans la partie Dash"]
+    "Plus aucune copie de clips sur ton PC",
+    "Les dash coupés restent dans l'app, sans fichier",
+    "Anciennes copies converties puis supprimées"]
 
 
 def ago(ts):

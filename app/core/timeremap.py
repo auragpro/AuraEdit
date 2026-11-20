@@ -15,7 +15,7 @@ from pathlib import Path
 
 import numpy as np
 
-from . import audio
+from . import audio, vclip
 from .project import config_dir
 
 FPS = 60
@@ -197,11 +197,11 @@ def _norm(a):
 
 
 def region_frames(path):
-    return _decode(["-i", str(path), "-an", "-vf", f"fps={FPS},{REGION}"], RW * RH * 3)
+    return _decode([*vclip.input_args(path), "-an", "-vf", f"fps={FPS},{REGION}"], RW * RH * 3)
 
 
 def region_image(path):
-    f = _decode(["-i", str(path), "-vf", REGION, "-frames:v", "1"], RW * RH * 3)
+    f = _decode([*vclip.input_args(path), "-vf", REGION, "-frames:v", "1"], RW * RH * 3)
     return f[0] if len(f) else None
 
 
@@ -210,7 +210,7 @@ KILL_REGION = "crop=iw*0.2:ih*0.2:iw*0.4:ih*0.68,scale=40:24"
 
 def find_kills(path):
     """Instants (frames) où la bannière de kill apparaît."""
-    p = subprocess.run([audio.ffmpeg_exe(), "-hide_banner", "-loglevel", "error", "-i", str(path), "-an",
+    p = subprocess.run([audio.ffmpeg_exe(), "-hide_banner", "-loglevel", "error", *vclip.input_args(path), "-an",
                         "-vf", f"fps={FPS},{KILL_REGION}", "-f", "rawvideo", "-pix_fmt", "gray", "-"],
                        capture_output=True, creationflags=audio._NO_WINDOW)
     data = np.frombuffer(p.stdout, dtype=np.uint8)
@@ -236,7 +236,7 @@ FLICK_FRAMES = 20                                              # keyframe 2 = fl
 
 
 def global_frames(path):
-    p = subprocess.run([audio.ffmpeg_exe(), "-hide_banner", "-loglevel", "error", "-i", str(path), "-an",
+    p = subprocess.run([audio.ffmpeg_exe(), "-hide_banner", "-loglevel", "error", *vclip.input_args(path), "-an",
                         "-vf", f"fps={FPS},{GLOBAL}", "-f", "rawvideo", "-pix_fmt", "gray", "-"],
                        capture_output=True, creationflags=audio._NO_WINDOW)
     data = np.frombuffer(p.stdout, dtype=np.uint8)
@@ -370,8 +370,8 @@ def detect(path, knife=None):
 
 def grab_png(path, t, width=480):
     """Image PNG (octets) de la vidéo à l'instant t, pour l'aperçu."""
-    p = subprocess.run([audio.ffmpeg_exe(), "-hide_banner", "-loglevel", "error", "-ss", f"{max(0, t):.3f}",
-                        "-i", str(path), "-frames:v", "1", "-vf", f"scale={width}:-2",
+    p = subprocess.run([audio.ffmpeg_exe(), "-hide_banner", "-loglevel", "error",
+                        *vclip.input_args(path, ss=t), "-frames:v", "1", "-vf", f"scale={width}:-2",
                         "-f", "image2pipe", "-vcodec", "png", "-"],
                        capture_output=True, creationflags=audio._NO_WINDOW)
     return p.stdout
@@ -380,8 +380,8 @@ def grab_png(path, t, width=480):
 def save_knife_image(name, path, t):
     """Garde la frame « couteau sorti » comme image de référence du couteau."""
     target = knife_dir() / (re.sub(r'[<>:"/\\|?*]', "_", name) + ".png")
-    subprocess.run([audio.ffmpeg_exe(), "-hide_banner", "-loglevel", "error", "-y", "-ss", f"{max(0, t):.3f}",
-                    "-i", str(path), "-frames:v", "1", str(target)],
+    subprocess.run([audio.ffmpeg_exe(), "-hide_banner", "-loglevel", "error", "-y",
+                    *vclip.input_args(path, ss=t), "-frames:v", "1", str(target)],
                    capture_output=True, creationflags=audio._NO_WINDOW)
     return str(target) if target.is_file() else None
 
@@ -402,7 +402,7 @@ def blend_mode(cfg):
 
 def source_fps(path):
     """Images par seconde réelles du clip (pour ne pas dupliquer d'images)."""
-    out = subprocess.run([audio.ffmpeg_exe(), "-hide_banner", "-i", str(path)], capture_output=True,
+    out = subprocess.run([audio.ffmpeg_exe(), "-hide_banner", "-i", vclip.source(path)], capture_output=True,
                          creationflags=audio._NO_WINDOW).stderr.decode("utf-8", "replace")
     for line in out.splitlines():
         if "Video:" in line:
@@ -452,8 +452,8 @@ def _decode_parallel(path, lo, sfps, factor, vf, needed, last_needed, is_cancell
         base = s0 * factor
         errf = tempfile.TemporaryFile()
         dec = subprocess.Popen([audio.ffmpeg_exe(), "-hide_banner", "-loglevel", "error",
-                                "-ss", f"{lo + s0 / sfps:.6f}", "-i", str(path),
-                                "-t", f"{(m1 + PAD - s0) / sfps:.6f}", "-an", "-vf", vf,
+                                *vclip.input_args(path, ss=lo + s0 / sfps), "-t", f"{(m1 + PAD - s0) / sfps:.6f}",
+                                "-an", "-vf", vf,
                                 "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
                                stdout=subprocess.PIPE, stderr=errf, creationflags=audio._NO_WINDOW)
         with lock:

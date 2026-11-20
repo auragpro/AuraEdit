@@ -197,7 +197,7 @@ class DashSplitDialog(QDialog):
                       "disparaît et où la main du dash apparaît). Vérifie CHAQUE coupe (clique-la dans la liste) : corrige avec ◀ -1 / +1 ▶ puis "
                       "« ↔ Déplacer ici », ajoute une coupe oubliée avec « ➕ Coupe ici », ou supprime une coupe "
                       "en trop. Pour chaque dash, choisis où il va dans la partie Dash : ⬅ Main gauche (touche G) "
-                      "ou Main droite ➡ (touche D), l'app passe ensuite au dash suivant. Chaque dash est ensuite enregistré à part : dash1, dash2...")
+                      "ou Main droite ➡ (touche D), l'app passe ensuite au dash suivant. Chaque dash est ensuite ajouté à part (dash1, dash2...) dans l'app, sans créer de fichier sur ton PC : il lit directement ta compilation.")
         info.setWordWrap(True)
         b_open = QPushButton("Choisir la compilation...")
         b_open.clicked.connect(self.open_video)
@@ -233,7 +233,7 @@ class DashSplitDialog(QDialog):
             side_row.addWidget(w)
         self.bar = QProgressBar()
         self.bar.setVisible(False)
-        self.b_go = QPushButton("✂ Couper et enregistrer les dash")
+        self.b_go = QPushButton("✂ Couper et ajouter les dash")
         self.b_go.setObjectName("primary")
         self.b_go.setEnabled(False)
         self.b_go.clicked.connect(self.export)
@@ -355,29 +355,29 @@ class DashSplitDialog(QDialog):
             self.list.setCurrentRow(row)
 
     def export(self):
+        """Aucun fichier créé : chaque dash est un morceau de la compilation, gardé dans l'app
+        (début et fin à la frame exacte)."""
         if not self.cuts or self._busy():
             return
-        folder = proj.clips_dir() / "Dash"
-        self.bar.setVisible(True)
-        self.b_go.setEnabled(False)
-        self.thread = ExportThread(self.path, sorted(self.cuts), self.length, folder, self, self.fps)
-        self.thread.progress.connect(lambda v, t: (self.bar.setValue(v), self.status.setText(t)))
-        self.thread.done.connect(self._exported)
-        self.thread.failed.connect(lambda m: (self.status.setText(f"Export impossible : {m}"),
-                                              self.b_go.setEnabled(True)))
-        self.thread.start()
-
-    def _exported(self, files):
-        cuts = sorted(self.cuts)
-        self.result_sides = {f: self.sides.get(c) for f, c in zip(files, cuts)}
+        from app.core import vclip
         folders = proj.load_clip_folders()
         lst = folders.setdefault("Dash", [])
+        used = [int(m.group(1)) for c in lst if (m := re.fullmatch(r"dash(\d+)", vclip.stem(c)))]
+        num = max(used, default=0)
+        cuts = sorted(self.cuts)
+        bounds = cuts + [self.length]
+        files, self.result_sides = [], {}
+        for i, c in enumerate(cuts):
+            num += 1
+            fa = int(round(c * self.fps))
+            fb = int(round(bounds[i + 1] * self.fps)) if i + 1 < len(cuts) else None
+            end = fb / self.fps if fb is not None else self.length
+            v = vclip.make(self.path, f"dash{num}", fa / self.fps, end)
+            files.append(v)
+            self.result_sides[v] = self.sides.get(c)
         lst += [f for f in files if f not in lst]
         proj.save_clip_folders(folders)
         self.result = files
-        self.bar.setValue(100)
-        self.status.setText(f"{len(files)} dash enregistré(s) dans {Path(files[0]).parent} "
-                            f"(catégorie Dash de « Mes clips »).")
         self.accept()
 
     def done(self, r):

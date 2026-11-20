@@ -34,6 +34,11 @@ class LoadingPage(QWidget):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
+        try:
+            from app.core import project as _proj
+            _proj.migrate_clips()                 # supprime les anciennes copies de clips (une fois)
+        except Exception:                         # noqa: BLE001
+            pass
         self.setWindowTitle("AuraEdit")
         self.resize(1200, 760)
         self.setMinimumSize(980, 640)

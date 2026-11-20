@@ -8,6 +8,7 @@ from PyQt6.QtGui import QIcon, QPixmap
 from PyQt6.QtWidgets import (QDialog, QFileDialog, QHBoxLayout, QLabel, QListWidget, QListWidgetItem,
                              QPushButton, QSlider, QStackedWidget, QVBoxLayout, QWidget)
 
+from app.core import vclip
 from app.core import project as proj
 from app.core import timeremap as tr
 from app.core import video_cuts
@@ -252,7 +253,7 @@ class ReproduceDialog(QDialog):
         knives = tr.load()["couteaux"]
         pools = []
         for name, clips in sorted(folders.items(), key=lambda kv: kv[0].lower()):
-            clips = [c for c in clips if Path(c).is_file()]
+            clips = [c for c in clips if vclip.exists(c)]
             if clips:
                 k = knives.get(name) or {}
                 pools.append((name, clips, k.get("carte") or k.get("image")))
@@ -294,7 +295,7 @@ class ReproduceDialog(QDialog):
             return
         cat, path = ch
         rm = tr.clip_remaps().get(path)
-        self.pick_name.setText(f"{cat} : {Path(path).name}" + ("  (time remap ✓)" if rm else ""))
+        self.pick_name.setText(f"{cat} : {vclip.name(path)}" + ("  (time remap ✓)" if rm else ""))
         self.pick_view.show_at(path, float(rm["debut"]) if rm else 0.5)
 
     def _pick(self, item):

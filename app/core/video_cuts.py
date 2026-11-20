@@ -4,7 +4,7 @@ import re
 import subprocess
 from pathlib import Path
 
-from . import audio
+from . import audio, vclip
 from . import sound_ai as sa
 
 NOT_KILL = set(sa.ALIGN_PEAK) | {"impact"}
@@ -12,7 +12,7 @@ NOT_KILL = set(sa.ALIGN_PEAK) | {"impact"}
 
 def detect_cuts(path, threshold=0.3, min_gap=0.25):
     """Moments (s) où l'image change d'un coup (transition, nouveau clip)."""
-    cmd = [audio.ffmpeg_exe(), "-hide_banner", "-nostdin", "-i", str(path), "-an", "-sn",
+    cmd = [audio.ffmpeg_exe(), "-hide_banner", "-nostdin", *vclip.input_args(path), "-an", "-sn",
            "-vf", f"scale=320:-2,select='gt(scene,{threshold})',showinfo", "-f", "null", "-"]
     proc = subprocess.run(cmd, capture_output=True, stdin=subprocess.DEVNULL,
                           creationflags=audio._NO_WINDOW)

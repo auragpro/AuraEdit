@@ -19,8 +19,8 @@ MODES = ("Clips", "Kunai", "Dash", "Dash back", "Dismiss")
 
 
 def _name(path):
-    p = Path(path)
-    return p.name if p.is_file() else f"⚠ {p.name} (introuvable)"
+    from app.core import vclip
+    return vclip.name(path) if vclip.exists(path) else f"⚠ {vclip.name(path)} (introuvable)"
 
 
 class OrderList(QListWidget):
@@ -601,23 +601,8 @@ class ClipsTab(QWidget):
         self.refresh_left()
 
     def _store(self, name, paths):
-        """Copie les clips dans la bibliothèque d'AuraEdit (Documents/AuraEdit/Clips/<couteau>)."""
-        out = []
-        dlg = QProgressDialog("Sauvegarde des clips dans AuraEdit...", "Arrêter", 0, len(paths), self)
-        dlg.setWindowModality(Qt.WindowModality.WindowModal)
-        dlg.setMinimumDuration(300)
-        for i, p in enumerate(paths):
-            if dlg.wasCanceled():
-                break
-            dlg.setValue(i)
-            dlg.setLabelText(f"Sauvegarde dans AuraEdit : {Path(p).name}")
-            QApplication.processEvents()
-            try:
-                out.append(proj.store_clip(p, name))
-            except OSError:
-                out.append(p)                      # copie impossible : on garde l'original
-        dlg.setValue(len(paths))
-        return out
+        """Les clips restent là où ils sont sur le PC : l'app garde seulement leur chemin (aucune copie)."""
+        return list(paths)
 
     def _add_to_folder(self, name, paths):
         clips = self.folders[name]
@@ -625,7 +610,7 @@ class ClipsTab(QWidget):
         new = [p for p in stored if p not in clips]
         clips += new
         self._save_folders()
-        self.status.setText(f"{len(new)} clip(s) sauvegardé(s) dans « {name} ».")
+        self.status.setText(f"{len(new)} clip(s) ajouté(s) dans « {name} » (sans copie sur le PC).")
 
     def fill_folder(self):
         name = self.knife
@@ -663,7 +648,7 @@ class ClipsTab(QWidget):
         if not items:
             self.status.setText("Sélectionne le ou les clips à supprimer.")
             return
-        what = f"le clip « {Path(items[0].data(ROLE)).name} »" if len(items) == 1 else f"ces {len(items)} clips"
+        what = f"le clip « {_name(items[0].data(ROLE))} »" if len(items) == 1 else f"ces {len(items)} clips"
         if not confirm(self, "Supprimer", f"Supprimer {what} du couteau « {self.knife} » ?\n"
                                           "Il ne sera plus proposé dans tes projets."):
             return

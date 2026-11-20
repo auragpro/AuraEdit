@@ -148,7 +148,7 @@ class HandsTab(QWidget):
         if added:
             self._sync()
         QMessageBox.information(self, "Compilation coupée",
-                                f"{len(dlg.result)} dash enregistré(s) (dash1, dash2...) dans « Mes clips » → Dash.\n"
+                                f"{len(dlg.result)} dash ajouté(s) (dash1, dash2...) dans « Mes clips » → Dash, sans fichier créé sur le PC.\n"
                                 f"{added} ajouté(s) ici dans la main choisie.")
 
     @property
@@ -158,7 +158,8 @@ class HandsTab(QWidget):
     def _item(self, path):
         p = Path(path)
         mark = "⏱ " if self.ATTR in ("kunai", "dashback", "dismiss") and str(path) in self.project.remaps else ""
-        item = QListWidgetItem(mark + (p.name if p.is_file() else f"⚠ {p.name} (introuvable)"))
+        from app.core import vclip
+        item = QListWidgetItem(mark + (vclip.name(path) if vclip.exists(path) else f"⚠ {vclip.name(path)} (introuvable)"))
         item.setData(ROLE, str(path))
         item.setToolTip(str(path))
         return item

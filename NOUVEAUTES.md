@@ -1,3 +1,11 @@
+## Nouveautés de la version 0.8.6
+
+- **Plus aucune copie de clips sur ton PC.**
+  - Quand tu ajoutes un clip, l'app garde seulement son emplacement : le fichier reste où il est, rien n'est dupliqué dans Documents/AuraEdit.
+  - **Couper une compilation de dash ne crée plus de fichiers** : chaque dash (dash1, dash2...) est gardé dans l'app comme un morceau de ta compilation, à la frame exacte. Ta compil reste le seul fichier.
+  - Les dash déjà coupés sont convertis automatiquement au lancement, avec ta main gauche / droite gardée, puis leurs copies sont supprimées de Documents/AuraEdit/Clips.
+- ⚠ Ne déplace pas et ne supprime pas tes compilations : les dash les lisent directement.
+
 ## Nouveautés de la version 0.8.5
 
 - **Couper une compilation de dash : chaque dash va directement dans la partie Dash, dans la main que tu choisis.**

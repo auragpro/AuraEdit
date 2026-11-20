@@ -167,7 +167,8 @@ class Project:
         files = [self.intro, self.outro, self.music, *self.clips, *self.kunai.videos, *self.dash.videos,
                  *self.dashback.videos, *self.dismiss.videos,
                  self.sons.get("paroles")]
-        return [f for f in files if f and not Path(f).is_file()]
+        from . import vclip
+        return [f for f in files if f and not vclip.exists(f)]
 
     def checklist(self):
         """Ce qui est prêt / ce qui manque, pour l'onglet Accueil."""
@@ -235,33 +236,13 @@ def remove_recent(path):
 # ------------------------------------------- dossiers de clips (couteaux) ----
 
 def clips_dir():
-    """Bibliothèque de clips d'AuraEdit : Documents/AuraEdit/Clips/<couteau>/."""
-    d = projects_dir().parent / "Clips"
-    d.mkdir(parents=True, exist_ok=True)
-    return d
+    """Ancien dossier des copies de clips (plus créé : l'app ne copie plus rien)."""
+    return projects_dir().parent / "Clips"
 
 
 def store_clip(src, knife):
-    """Copie le clip dans la bibliothèque d'AuraEdit (s'il n'y est pas déjà) et renvoie la copie."""
-    import shutil
-    src = Path(src)
-    lib = clips_dir()
-    try:
-        src.resolve().relative_to(lib.resolve())
-        return str(src)                          # déjà dans la bibliothèque
-    except ValueError:
-        pass
-    folder = lib / re.sub(r'[<>:"/\\|?*]', "_", knife)
-    folder.mkdir(parents=True, exist_ok=True)
-    target = folder / src.name
-    n = 2
-    while target.exists():
-        if target.stat().st_size == src.stat().st_size:
-            return str(target)                   # même clip déjà copié
-        target = folder / f"{src.stem} ({n}){src.suffix}"
-        n += 1
-    shutil.copy2(src, target)
-    return str(target)
+    """Plus de copie : le clip reste à sa place sur le PC, l'app garde juste son chemin."""
+    return str(src)
 
 
 def _folders_file():
@@ -404,3 +385,77 @@ def scan_videos(folders, max_depth=4, limit=5000, is_cancelled=None):
                     except OSError:
                         continue
     return [p for p, _ in sorted(found.items(), key=lambda kv: kv[1], reverse=True)]
+
+
+# ------------------------------------- migration : plus de copies de clips ----
+
+def migrate_clips():
+    """Une seule fois : remplace les anciennes copies de clips (Documents/AuraEdit/Clips/...) par leur
+    équivalent sans fichier (morceau de la compilation d'origine) partout dans l'app (Mes clips,
+    projets, réglages), puis supprime ces copies du PC. La liste est dans migration_clips.json."""
+    f = projects_dir().parent / "migration_clips.json"
+    if not f.is_file():
+        return 0
+    try:
+        mp = json.loads(f.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return 0
+
+    def norm(s):
+        return os.path.normcase(os.path.normpath(s))
+
+    table = {norm(k): v for k, v in mp.items()}
+
+    def fix_str(s):
+        if len(s) < 500 and ("/" in s or "\\" in s):
+            return table.get(norm(s), s)
+        return s
+
+    def fix(o):
+        if isinstance(o, dict):
+            return {fix_str(k) if isinstance(k, str) else k: fix(v) for k, v in o.items()}
+        if isinstance(o, list):
+            out = [fix(v) for v in o]
+            if out and all(isinstance(v, str) for v in out):
+                out = list(dict.fromkeys(out))           # sans doublon
+            return out
+        if isinstance(o, str):
+            return fix_str(o)
+        return o
+
+    targets = list(config_dir().glob("*.json")) + list(projects_dir().glob("*.auraedit"))
+    for t in targets:
+        try:
+            data = json.loads(t.read_text(encoding="utf-8"))
+            new = fix(data)
+            if new != data:
+                t.write_text(json.dumps(new, ensure_ascii=False, indent=1), encoding="utf-8")
+        except (OSError, json.JSONDecodeError, ValueError):
+            continue
+    removed = 0
+    for old in mp:
+        p = Path(old)
+        try:
+            if p.is_file():
+                p.unlink()
+                removed += 1
+        except OSError:
+            pass
+    lib = projects_dir().parent / "Clips"
+    if lib.is_dir():
+        for d in sorted(lib.iterdir(), reverse=True):
+            try:
+                if d.is_dir() and not any(d.iterdir()):
+                    d.rmdir()
+            except OSError:
+                pass
+        try:
+            if not any(lib.iterdir()):
+                lib.rmdir()
+        except OSError:
+            pass
+    try:
+        f.rename(f.with_suffix(".fait.json"))
+    except OSError:
+        pass
+    return removed

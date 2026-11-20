@@ -10,7 +10,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from . import audio
+from . import audio, vclip
 
 W, H, FPS = 1920, 1080, 60
 
@@ -40,6 +40,8 @@ def _run(cmd, is_cancelled=None):
 
 
 def duration(path):
+    if vclip.length(path) is not None:
+        return vclip.length(path)
     out = subprocess.run([audio.ffmpeg_exe(), "-hide_banner", "-i", str(path)], capture_output=True,
                          creationflags=audio._NO_WINDOW).stderr.decode("utf-8", "replace")
     m = re.search(r"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)", out)
@@ -53,7 +55,7 @@ def segments(project):
     segs += [("clip", c) for c in dict.fromkeys(project.clips)]      # chaque clip une seule fois
     if project.outro:
         segs.append(("outro", project.outro))
-    return [(k, p) for k, p in segs if p and Path(p).is_file()]
+    return [(k, p) for k, p in segs if p and vclip.exists(p)]
 
 
 def render(project, output, progress=None, is_cancelled=None, export=None):
@@ -70,13 +72,13 @@ def render(project, output, progress=None, is_cancelled=None, export=None):
         parts, info, t = [], [], 0.0
         for i, (kind, path) in enumerate(segs):
             if progress:
-                progress(i / steps, f"Préparation {i + 1}/{len(segs)} : {Path(path).name}")
+                progress(i / steps, f"Préparation {i + 1}/{len(segs)} : {vclip.name(path)}")
             part = tmp / f"{i:04d}.mp4"
             remap = project.remaps.get(path) if kind == "clip" else None
             if remap:
                 from . import timeremap
                 try:
-                    name = Path(path).name
+                    name = vclip.name(path)
                     timeremap.render(path, float(remap["debut"]), float(remap["fin"]), timeremap.cfg_for(remap), part,
                                      is_cancelled,
                                      (lambda f, txt, i=i, name=name: progress((i + f) / steps,
@@ -85,14 +87,14 @@ def render(project, output, progress=None, is_cancelled=None, export=None):
                 except InterruptedError:
                     raise Cancelled()
                 except (ValueError, KeyError, OSError) as e:
-                    raise RenderError(f"Time remap impossible pour {Path(path).name} :\n{e}")
+                    raise RenderError(f"Time remap impossible pour {vclip.name(path)} :\n{e}")
                 d = duration(part)
                 info.append({"type": kind, "fichier": str(path), "debut": round(t, 3), "duree": round(d, 3),
                              "time_remap": True})
                 parts.append(part)
                 t += d
                 continue
-            _run([ff, "-y", "-hide_banner", "-i", str(path), "-an", "-vf", vf, "-c:v", "libx264",
+            _run([ff, "-y", "-hide_banner", *vclip.input_args(path), "-an", "-vf", vf, "-c:v", "libx264",
                   "-preset", "veryfast", "-crf", "10", str(part)], is_cancelled)
             d = duration(part)
             info.append({"type": kind, "fichier": str(path), "debut": round(t, 3), "duree": round(d, 3)})

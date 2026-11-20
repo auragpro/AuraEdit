@@ -105,7 +105,7 @@ class MontageTab(QWidget):
     def refresh(self):
         p = self.project
         def name(f):
-            return Path(f).name if f else None
+            return __import__("app.core.vclip", fromlist=["x"]).name(f) if f else None
 
         def hands(st):
             if not st.enabled:

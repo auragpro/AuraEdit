@@ -24,7 +24,8 @@ def ffmpeg_exe():
 
 def load(path, sr=44100, channels=1):
     """Audio en float32 (-1..1). channels=1 -> [n], channels=2 -> [n, 2]."""
-    cmd = [ffmpeg_exe(), "-nostdin", "-v", "error", "-i", str(path), "-vn",
+    from . import vclip
+    cmd = [ffmpeg_exe(), "-nostdin", "-v", "error", *vclip.input_args(path), "-vn",
            "-ac", str(channels), "-ar", str(sr), "-f", "f32le", "pipe:1"]
     proc = subprocess.run(cmd, capture_output=True, stdin=subprocess.DEVNULL, creationflags=_NO_WINDOW)
     if proc.returncode != 0:
