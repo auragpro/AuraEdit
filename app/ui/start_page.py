@@ -13,9 +13,9 @@ from version import __version__
 from .style import RED, asset
 
 WHATS_NEW = [
-    "Détection des dash refaite : 1re frame floue du dash",
-    "Les flicks normaux ne sont plus pris pour des dash",
-    "Couper une compilation de dash plus fiable"]
+    "Coupe des dash : frame où la main du dash apparaît",
+    "La frame d'avant montre encore l'arme",
+    "Toujours vérifiable à la frame près avant l'export"]
 
 
 def ago(ts):

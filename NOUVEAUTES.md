@@ -1,3 +1,7 @@
+## Nouveautés de la version 0.8.1
+
+- **Coupe des dash corrigée** : la coupe se fait maintenant sur **la frame où l'arme disparaît et où la main du dash apparaît** (la frame d'avant montre encore l'arme), juste après chaque bannière de kill.
+
 ## Nouveautés de la version 0.8.0
 
 - **Détection des dash refaite** pour « Couper une compilation de dash » : l'app repère maintenant la **1re frame où toute l'image devient floue** (traînées de vent du dash de Jett), au lieu d'un simple gros mouvement.
