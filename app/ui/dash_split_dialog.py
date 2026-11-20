@@ -19,43 +19,73 @@ ROLE = Qt.ItemDataRole.UserRole
 FPS = tr.FPS
 
 
-def _first_hand(a, i):
-    """Depuis un changement détecté vers i : 1re frame qui ne ressemble plus à l'arme
-    (la frame d'avant montre encore l'arme, celle-ci montre déjà la main du dash)."""
-    F, n = a.F, a.n
-    lo = max(1, i - 4)
-    before = F[max(0, lo - 10):lo].mean(axis=0)
-    before /= np.linalg.norm(before) + 1e-6
-    for j in range(lo, min(n, i + 4)):
-        if float(F[j] @ before) < 0.6:
-            return j
-    return i
+def _native_region(path, t0, count, sfps):
+    """Zone des mains à la cadence réelle de la vidéo (toutes les frames), à partir de la frame t0*sfps."""
+    p = subprocess.run([audio.ffmpeg_exe(), "-hide_banner", "-loglevel", "error",
+                        "-ss", f"{max(0.0, t0 - 0.3 / sfps):.6f}", "-i", str(path), "-an",
+                        "-frames:v", str(count), "-vf", tr.REGION, "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
+                       capture_output=True, creationflags=audio._NO_WINDOW)
+    size = tr.RW * tr.RH * 3
+    data = np.frombuffer(p.stdout, dtype=np.uint8)
+    n = len(data) // size
+    return tr._norm(data[:n * size].reshape(n, size))
+
+
+def _refine(path, tc, kill_t, sfps):
+    """Frame exacte (cadence réelle) où la main du dash apparaît, autour de tc (estimation à 60 i/s).
+    Chaque frame est comparée à « l'arme » (frames juste avant) et à « la main » (frames juste après) :
+    la coupe = 1re frame plus proche de la main que de l'arme, et qui le reste. Jamais avant le kill."""
+    f0 = max(0, int(round((tc - 0.30) * sfps)))
+    F = _native_region(path, f0 / sfps, int(0.6 * sfps) + 2, sfps)
+    n = len(F)
+    if n < 10:
+        return tc
+    c = int(round(tc * sfps)) - f0                      # position estimée dans la fenêtre
+    w0, w1 = max(0, c - int(0.25 * sfps)), max(1, c - int(0.06 * sfps))
+    h0, h1 = min(n - 1, c + int(0.05 * sfps)), min(n, c + int(0.16 * sfps))
+    if w1 <= w0 or h1 <= h0:
+        return tc
+    W = F[w0:w1].mean(axis=0)
+    W /= np.linalg.norm(W) + 1e-6
+    H = F[h0:h1].mean(axis=0)
+    H /= np.linalg.norm(H) + 1e-6
+    closer = (F @ H) - (F @ W) > 0                     # vrai = ressemble plus à la main qu'à l'arme
+    lo = max(w1, int(np.floor(kill_t * sfps)) - f0 + 1 if kill_t is not None else 0)
+    for j in range(lo, n - 2):
+        if closer[j] and closer[j + 1] and closer[j + 2]:
+            return (f0 + j) / sfps
+    return tc
 
 
 def dash_starts(path):
-    """1re frame de chaque dash (en secondes) = la frame où l'arme disparaît et où la main du dash
-    apparaît (zone des mains). On prend le 1er changement de la zone des mains après chaque bannière
-    de kill (dans les 3 s)."""
+    """1re frame de chaque dash (en secondes, sur une frame exacte de la vidéo) = la frame où l'arme
+    disparaît et où la main du dash apparaît, juste après la bannière de kill."""
     a = tr.Analysis(path)
     n, kills = a.n, a.kills
+    sfps = float(tr.source_fps(path))
     sw = [i for i in range(10, n - 9) if a._switch(i)]
-    picks = []
+    picks = []                                       # (frame 60 i/s, kill 60 i/s ou None)
     if kills:
         for k in kills:
             c = [i for i in sw if k < i <= k + 3 * FPS]
             if c:
-                picks.append(c[0])
-    else:                                            # pas de bannière vue : chaque 1er changement,
-        last = -10 ** 9                              # puis on ignore le retour de l'arme
+                picks.append((c[0], k))
+    else:
+        last = -10 ** 9
         for i in sw:
             if i - last > 1.2 * FPS:
-                picks.append(i)
+                picks.append((i, None))
                 last = i
     starts = []
-    for i in picks:
-        t = _first_hand(a, i) / FPS
+    for i, k in picks:
+        lo = max(1, i - 4)                           # 1re frame (60 i/s) qui ne ressemble plus à l'arme
+        before = a.F[max(0, lo - 10):lo].mean(axis=0)
+        before /= np.linalg.norm(before) + 1e-6
+        j = next((x for x in range(lo, min(n, i + 4)) if float(a.F[x] @ before) < 0.6), i)
+        t = _refine(path, j / FPS, None if k is None else k / FPS, sfps)
+        t = round(t * sfps) / sfps
         if not starts or t - starts[-1] > 0.4:
-            starts.append(round(t, 4))
+            starts.append(t)
     return starts, n / FPS, kills
 
 
@@ -80,9 +110,10 @@ class ExportThread(QThread):
     done = pyqtSignal(list)
     failed = pyqtSignal(str)
 
-    def __init__(self, path, cuts, length, folder, parent=None):
+    def __init__(self, path, cuts, length, folder, parent=None, fps=60.0):
         super().__init__(parent)
         self.path, self.cuts, self.length, self.folder = path, cuts, length, Path(folder)
+        self.fps = fps
 
     def run(self):
         try:
@@ -97,9 +128,14 @@ class ExportThread(QThread):
                 num += 1
                 target = self.folder / f"dash{num}.mp4"
                 self.progress.emit(int(100 * i / len(self.cuts)), f"Export de {target.name}...")
-                # -ss après -i : coupe exacte à la frame (ré-encodage en très bonne qualité)
+                # coupe au numéro de frame exact (trim), même frame que celle vue dans l'aperçu
+                fa = int(round(a * self.fps))
+                fb = int(round(b * self.fps)) if i + 1 < len(self.cuts) else 10 ** 9
+                ta, tb = fa / self.fps, (fb / self.fps if fb < 10 ** 9 else self.length + 1)
                 p = subprocess.run([audio.ffmpeg_exe(), "-y", "-hide_banner", "-loglevel", "error",
-                                    "-i", self.path, "-ss", f"{a:.4f}", "-t", f"{max(0.05, b - a):.4f}",
+                                    "-i", self.path,
+                                    "-vf", f"trim=start_frame={fa}:end_frame={fb},setpts=PTS-STARTPTS",
+                                    "-af", f"atrim=start={ta:.6f}:end={tb:.6f},asetpts=PTS-STARTPTS",
                                     "-c:v", "libx264", "-preset", "medium", "-crf", "12",
                                     "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "320k", str(target)],
                                    capture_output=True, creationflags=audio._NO_WINDOW)
@@ -217,7 +253,7 @@ class DashSplitDialog(QDialog):
         t = v / self.fps
         self.pos.setText(fmt(t))
         if self.path:
-            self.view.show_at(self.path, t)
+            self.view.show_at(self.path, max(0.0, t - 0.3 / self.fps))   # tombe pile sur la frame v
 
     def _here(self):
         return self.slider.value() / self.fps
@@ -246,7 +282,7 @@ class DashSplitDialog(QDialog):
         folder = proj.clips_dir() / "Dash"
         self.bar.setVisible(True)
         self.b_go.setEnabled(False)
-        self.thread = ExportThread(self.path, sorted(self.cuts), self.length, folder, self)
+        self.thread = ExportThread(self.path, sorted(self.cuts), self.length, folder, self, self.fps)
         self.thread.progress.connect(lambda v, t: (self.bar.setValue(v), self.status.setText(t)))
         self.thread.done.connect(self._exported)
         self.thread.failed.connect(lambda m: (self.status.setText(f"Export impossible : {m}"),

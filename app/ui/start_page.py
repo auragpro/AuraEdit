@@ -13,9 +13,9 @@ from version import __version__
 from .style import RED, asset
 
 WHATS_NEW = [
-    "Coupe des dash : frame où la main du dash apparaît",
-    "La frame d'avant montre encore l'arme",
-    "Toujours vérifiable à la frame près avant l'export"]
+    "Coupe des dash affinée à la vraie cadence de la vidéo",
+    "1re frame de la main du dash, jamais avant le kill",
+    "Aperçu et export tombent sur exactement la même frame"]
 
 
 def ago(ts):

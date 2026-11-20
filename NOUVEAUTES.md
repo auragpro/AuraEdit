@@ -1,3 +1,10 @@
+## Nouveautés de la version 0.8.2
+
+- **Coupe des dash à la frame près** :
+  - L'app affine maintenant chaque coupe **à la vraie cadence de ta vidéo** (toutes les frames, 120/144/240 i/s compris) et plus seulement à 60 i/s.
+  - La coupe tombe sur **la 1re frame qui ressemble à la main du dash plutôt qu'à l'arme**, et **jamais avant le kill**.
+  - **L'aperçu et l'export tombent exactement sur la même frame** : la frame que tu vois est celle où le dash commence.
+
 ## Nouveautés de la version 0.8.1
 
 - **Coupe des dash corrigée** : la coupe se fait maintenant sur **la frame où l'arme disparaît et où la main du dash apparaît** (la frame d'avant montre encore l'arme), juste après chaque bannière de kill.
