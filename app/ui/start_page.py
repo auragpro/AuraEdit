@@ -13,9 +13,9 @@ from version import __version__
 from .style import RED, asset
 
 WHATS_NEW = [
-    "Nouveau : couper une compilation de dash (dash1, dash2...)",
-    "Coupe à la 1re frame du dash après chaque kill",
-    "Chaque coupe vérifiable et corrigeable à la frame près"]
+    "Détection des dash refaite : 1re frame floue du dash",
+    "Les flicks normaux ne sont plus pris pour des dash",
+    "Couper une compilation de dash plus fiable"]
 
 
 def ago(ts):

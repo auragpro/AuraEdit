@@ -1,3 +1,9 @@
+## Nouveautés de la version 0.8.0
+
+- **Détection des dash refaite** pour « Couper une compilation de dash » : l'app repère maintenant la **1re frame où toute l'image devient floue** (traînées de vent du dash de Jett), au lieu d'un simple gros mouvement.
+  - Un flick normal reste net : il n'est plus pris pour un dash.
+  - Les dash très nets sont gardés même si la bannière de kill n'a pas été vue.
+
 ## Nouveautés de la version 0.7.9
 
 - **Couper une compilation de dash** : bouton **« ✂ Couper une compilation de dash... »** dans **Montage → Dash**.

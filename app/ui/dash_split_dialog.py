@@ -19,35 +19,77 @@ ROLE = Qt.ItemDataRole.UserRole
 FPS = tr.FPS
 
 
+SW, SH = 192, 108
+SHARP = f"crop=iw*0.8:ih*0.6:iw*0.1:ih*0.15,scale={SW}:{SH}"   # grande zone centrale, sans le HUD
+
+
+def sharp_curve(path):
+    """Netteté de chaque frame (gradient moyen). Le dash de Jett floute toute l'image d'un coup
+    (traînées de vent + flou de mouvement) alors qu'un flick normal reste net."""
+    p = subprocess.run([audio.ffmpeg_exe(), "-hide_banner", "-loglevel", "error", "-i", str(path), "-an",
+                        "-vf", f"fps={FPS},{SHARP}", "-f", "rawvideo", "-pix_fmt", "gray", "-"],
+                       capture_output=True, creationflags=audio._NO_WINDOW)
+    data = np.frombuffer(p.stdout, dtype=np.uint8)
+    n = len(data) // (SW * SH)
+    F = data[:n * SW * SH].reshape(n, SH, SW).astype(np.float32)
+    gx = np.abs(np.diff(F, axis=2)).mean(axis=(1, 2))
+    gy = np.abs(np.diff(F, axis=1)).mean(axis=(1, 2))
+    small = F[:, ::3, ::3].reshape(n, -1)
+    mot = np.zeros(n)
+    mot[1:] = np.abs(np.diff(small, axis=0)).mean(axis=1)
+    return gx + gy, mot
+
+
+def dash_events(sharp, mot):
+    """Débuts des passages flous (dash) : la netteté tombe nettement sous celle des frames d'avant."""
+    n = len(sharp)
+    ratio = np.ones(n)
+    for i in range(n):
+        ref = sharp[max(0, i - 45):max(0, i - 4)]
+        if len(ref) >= 5:
+            ratio[i] = sharp[i] / max(1e-3, float(np.percentile(ref, 70)))
+    blur = ratio < 0.62
+    ev = []
+    i = 0
+    while i < n:
+        if blur[i]:
+            j = i
+            while j + 1 < n and (blur[j + 1] or (j + 2 < n and blur[j + 2])):
+                j += 1
+            if j - i + 1 >= 3:
+                s = i
+                while s > 0 and ratio[s - 1] < 0.85 and i - s < 4:     # 1re frame où le flou commence
+                    s -= 1
+                ev.append((s, float(ratio[i:j + 1].min()), j - i + 1))
+            i = j + 1
+        else:
+            i += 1
+    return ev, ratio
+
+
 def dash_starts(path):
-    """1re frame de chaque dash (en secondes) : après chaque bannière de kill, le premier gros
-    mouvement de toute l'image, puis on recule jusqu'au tout début de ce mouvement."""
+    """1re frame de chaque dash (en secondes). Un dash = l'image entière devient floue d'un coup.
+    On garde ceux qui suivent une bannière de kill (dans les 3 s) + les dash très nets même sans
+    bannière détectée (la détection des bannières n'est pas parfaite)."""
     kills = tr.find_kills(path)
-    G = tr.global_frames(path)
-    n = len(G)
+    sharp, mot = sharp_curve(path)
+    n = len(sharp)
     if n < 4:
         raise ValueError("Vidéo illisible ou trop courte.")
-    m = np.zeros(n)
-    m[1:] = np.abs(np.diff(G, axis=0)).mean(axis=1)
-    for i in range(1, n - 1):                    # clips à 120 i/s : une frame sur deux est un doublon
-        if m[i] < 0.5:
-            m[i] = max(m[i - 1], m[i + 1])
-    med = float(np.median(m[m > 0])) if np.any(m > 0) else 0.0
-    thr = max(18.0, 2.5 * med)
+    ev, _ = dash_events(sharp, mot)
     starts = []
-    for k in kills:
-        hi = min(n, k + int(1.5 * FPS))
-        big = [i for i in range(k + 2, hi) if m[i] >= thr]
-        if not big:
-            continue
-        i = big[0]
-        peak = i + int(np.argmax(m[i:min(n, i + 10)]))
-        j = peak
-        while j > k + 1 and m[j - 1] >= 0.35 * m[peak]:     # début du mouvement
-            j -= 1
-        t = j / FPS
-        if not starts or t - starts[-1] > 0.4:
-            starts.append(round(t, 4))
+    for s, mn, ln in ev:
+        after_kill = any(0 < s - k <= 3 * FPS for k in kills)
+        if after_kill or (mn < 0.5 and ln >= 5):
+            t = s / FPS
+            if not starts or t - starts[-1] > 0.4:
+                starts.append(round(t, 4))
+    if not starts:                                   # secours : ancien critère (gros mouvement après le kill)
+        thr = max(18.0, 2.5 * float(np.median(mot[mot > 0]) if np.any(mot > 0) else 0))
+        for k in kills:
+            big = [i for i in range(k + 2, min(n, k + int(1.5 * FPS))) if mot[i] >= thr]
+            if big and (not starts or big[0] / FPS - starts[-1] > 0.4):
+                starts.append(round(big[0] / FPS, 4))
     return starts, n / FPS, kills
 
 
