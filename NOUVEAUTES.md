@@ -1,3 +1,10 @@
+## Nouveautés de la version 0.9.2
+
+- **Reproduire : tes edits découpés sont gardés.** Une liste « Edits déjà découpés » garde les transitions ET les clips choisis de chaque edit. Double-clic (ou « Reprendre cet edit ») pour continuer là où tu t'étais arrêté, sans refaire l'analyse. Rouvrir le même edit le reprend tout seul.
+- **Reproduire : bouton « ➕ Ajouter des clips »** pour ajouter des clips à un couteau (ou un nouveau couteau), au Dash, au Kunai, au Dash back ou au Dismiss sans quitter la fenêtre. Tout est synchronisé : ils arrivent dans « Mes clips » et, pour Dash / Kunai..., dans la partie du Montage avec la main choisie (gauche / droite).
+- **Montage : le carré « Dash back » est retiré** (la catégorie Dash back reste dans « Mes clips »).
+- Les parties Dash / Kunai / Dismiss se mettent à jour toutes seules quand des clips sont ajoutés ailleurs.
+
 ## Nouveautés de la version 0.9.1
 
 - **La durée du ralenti se cale sur les marqueurs de la musique.**

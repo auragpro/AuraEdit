@@ -212,6 +212,17 @@ class HandsTab(QWidget):
 
     def showEvent(self, e):
         super().showEvent(e)
+        # vidéos ajoutées ailleurs (ex. dans Reproduire) : on recale les listes sur le projet
+        changed = False
+        for side, lst in self.lists.items():
+            want = list(getattr(self.settings, side))
+            if [lst.item(i).data(ROLE) for i in range(lst.count())] != want:
+                lst.clear()
+                for v in want:
+                    lst.addItem(self._item(v))
+                changed = True
+        if changed:
+            self._refresh()
         if self.ATTR in ("kunai", "dashback", "dismiss"):
             try:
                 from app.core import timeremap as tr

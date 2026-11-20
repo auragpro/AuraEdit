@@ -9,7 +9,6 @@ from ..style import PANEL, PANEL_2, RED
 from ..widgets import page_header
 from .clips_tab import ClipsTab
 from .dash_tab import DashTab
-from .dashback_tab import DashBackTab
 from .dismiss_tab import DismissTab
 from .intro_tab import IntroTab
 from .kunai_tab import KunaiTab
@@ -17,7 +16,7 @@ from .music_tab import MusicTab
 from .shake_tab import ShakeTab
 
 PARTS = [("Intro", IntroTab), ("Musique", MusicTab), ("Clips", ClipsTab),
-         ("Kunai", KunaiTab), ("Dash", DashTab), ("Dash back", DashBackTab), ("Dismiss", DismissTab),
+         ("Kunai", KunaiTab), ("Dash", DashTab), ("Dismiss", DismissTab),
          ("Shake", ShakeTab)]
 ICONS = {"Intro": "🎬", "Musique": "🎵", "Clips": "🔪", "Kunai": "🗡", "Dash": "💨", "Dash back": "↩", "Dismiss": "🌀", "Shake": "💥", "Reproduire": "🎞", "Générer": "▶"}
 
@@ -82,7 +81,7 @@ class MontageTab(QWidget):
             wl.addWidget(page, 1)
             self.stack.addWidget(wrap)
         self.parts["Kunai"].changed.connect(self.parts["Clips"].refresh_left)
-        for n in ("Dash", "Dash back", "Dismiss"):
+        for n in ("Dash", "Dismiss"):
             self.parts[n].changed.connect(self.parts["Clips"].refresh_left)
 
         lay = QVBoxLayout(self)
@@ -135,7 +134,9 @@ class MontageTab(QWidget):
 
     def reproduce(self):
         from ..reproduce_dialog import ReproduceDialog
-        if ReproduceDialog(self.project, self).exec():
+        ok = ReproduceDialog(self.project, self).exec()
+        self._changed()                       # clips ajoutés depuis Reproduire : tout se met à jour
+        if ok:
             clips = self.parts["Clips"]
             clips.order.clear()
             for c in self.project.clips:

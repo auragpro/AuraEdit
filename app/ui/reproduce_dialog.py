@@ -1,12 +1,15 @@
 """Fenêtre « Reproduire un edit » : on donne un edit fini, l'app trouve toutes les transitions,
 puis on choisit plan par plan le clip à mettre (un couteau de ma bibliothèque, un dash, un kunai)."""
+import json
 import random
+import time
 from pathlib import Path
 
 from PyQt6.QtCore import QSize, Qt, QThread, QTimer, pyqtSignal
 from PyQt6.QtGui import QIcon, QPixmap
-from PyQt6.QtWidgets import (QDialog, QFileDialog, QHBoxLayout, QLabel, QListWidget, QListWidgetItem,
-                             QPushButton, QSlider, QStackedWidget, QVBoxLayout, QWidget)
+from PyQt6.QtWidgets import (QDialog, QFileDialog, QHBoxLayout, QInputDialog, QLabel, QListWidget,
+                             QListWidgetItem, QMenu, QMessageBox, QPushButton, QSlider, QStackedWidget,
+                             QVBoxLayout, QWidget)
 
 from app.core import vclip
 from app.core import project as proj
@@ -15,6 +18,26 @@ from app.core import video_cuts
 
 ROLE = Qt.ItemDataRole.UserRole
 PREV_W, PREV_H = 560, 315
+
+
+def _saved_file():
+    return proj.config_dir() / "reproduire_edits.json"
+
+
+def load_saved():
+    """Edits déjà découpés : {chemin de l'edit: {"cuts", "length", "fps", "choices", "overlays", "date"}}."""
+    try:
+        d = json.loads(_saved_file().read_text(encoding="utf-8"))
+        return d if isinstance(d, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def write_saved(d):
+    try:
+        _saved_file().write_text(json.dumps(d, ensure_ascii=False, indent=1), encoding="utf-8")
+    except OSError:
+        pass
 
 
 def fmt(t):
@@ -144,7 +167,21 @@ class ReproduceDialog(QDialog):
         left = QVBoxLayout()
         left.addWidget(self.view)
         left.addLayout(srow)
+        self.saved_list = QListWidget()
+        self.saved_list.setMaximumHeight(150)
+        self.saved_list.itemDoubleClicked.connect(lambda it: self.load_edit(it.data(ROLE)))
+        b_load = QPushButton("📂 Reprendre cet edit")
+        b_load.clicked.connect(lambda: self.saved_list.currentItem() and
+                               self.load_edit(self.saved_list.currentItem().data(ROLE)))
+        b_forget = QPushButton("🗑 Retirer de la liste")
+        b_forget.clicked.connect(self.forget_edit)
         right = QVBoxLayout()
+        right.addWidget(QLabel("Edits déjà découpés (tout est gardé : transitions et clips choisis)"))
+        right.addWidget(self.saved_list)
+        srow2 = QHBoxLayout()
+        srow2.addWidget(b_load)
+        srow2.addWidget(b_forget)
+        right.addLayout(srow2)
         right.addWidget(QLabel("Transitions trouvées"))
         right.addWidget(self.cut_list, 1)
         right.addWidget(b_add)
@@ -164,14 +201,71 @@ class ReproduceDialog(QDialog):
         lay.addLayout(top)
         lay.addLayout(body, 1)
         lay.addLayout(bottom)
+        self._fill_saved()
         return w
+
+    # ------------------------------------------------------------ edits enregistrés
+    def _fill_saved(self):
+        self.saved_list.clear()
+        d = load_saved()
+        for path, e in sorted(d.items(), key=lambda kv: -float(kv[1].get("date", 0))):
+            n = len(e.get("cuts", [])) + 1
+            done = sum(1 for c in e.get("choices", []) if c)
+            ok = "" if Path(path).is_file() else "  ⚠ fichier introuvable"
+            it = QListWidgetItem(f"{Path(path).name}  —  {n} plans, {done} clip(s) choisi(s)  "
+                                 f"({time.strftime('%d/%m %H:%M', time.localtime(float(e.get('date', 0))))}){ok}")
+            it.setData(ROLE, path)
+            self.saved_list.addItem(it)
+
+    def save_state(self):
+        """Garde les transitions et les clips choisis de cet edit (on peut le reprendre plus tard)."""
+        if not self.path:
+            return
+        d = load_saved()
+        d[self.path] = {"cuts": [round(c, 4) for c in sorted(self.cuts)], "length": self.length, "fps": self.fps,
+                        "choices": [list(c) if c else None for c in self.choices],
+                        "overlays": {str(k): v for k, v in self.overlays.items()}, "date": time.time()}
+        write_saved(d)
+
+    def load_edit(self, path):
+        e = load_saved().get(path)
+        if not e:
+            return
+        if not Path(path).is_file():
+            self.cut_status.setText("Cet edit n'est plus à son emplacement sur le PC.")
+            return
+        self.path = path
+        self.length, self.fps = float(e.get("length") or 0), float(e.get("fps") or 60)
+        self.cuts = [float(c) for c in e.get("cuts", [])]
+        self.choices = [tuple(c) if c else None for c in e.get("choices", [])]
+        self.overlays = {int(k): v for k, v in (e.get("overlays") or {}).items()}
+        self.slider.setRange(0, max(1, int(self.length * self.fps) - 1))
+        self.slider.setEnabled(True)
+        self._fill_cuts()
+        self._goto(0.0)
+        self.b_next.setEnabled(True)
+        self.cut_status.setText(f"Edit repris : {len(self.cuts)} transition(s), "
+                                f"{sum(1 for c in self.choices if c)} clip(s) déjà choisi(s).")
+
+    def forget_edit(self):
+        it = self.saved_list.currentItem()
+        if it is None:
+            return
+        d = load_saved()
+        d.pop(it.data(ROLE), None)
+        write_saved(d)
+        self._fill_saved()
 
     def open_edit(self):
         f, _ = QFileDialog.getOpenFileName(self, "Edit à reproduire", "",
                                            "Vidéos (*.mp4 *.mov *.mkv *.avi *.webm)")
         if not f or (self.thread is not None and self.thread.isRunning()):
             return
+        if f in load_saved():
+            self.load_edit(f)                     # déjà découpé : on reprend là où on en était
+            return
         self.path = f
+        self.choices, self.overlays = [], {}
         self.cut_status.setText("Je cherche les transitions...")
         self.thread = CutsThread(f, self)
         self.thread.done.connect(self._cuts_found)
@@ -186,6 +280,8 @@ class ReproduceDialog(QDialog):
         self._fill_cuts()
         self._goto(0.0)
         self.b_next.setEnabled(True)
+        self.save_state()
+        self._fill_saved()
 
     def _fill_cuts(self):
         self.cuts.sort()
@@ -214,12 +310,14 @@ class ReproduceDialog(QDialog):
         if all(abs(t - c) > 0.5 / self.fps for c in self.cuts):
             self.cuts.append(t)
             self._fill_cuts()
+            self.save_state()
 
     def del_cut(self):
         it = self.cut_list.currentItem()
         if it is not None:
             self.cuts = [c for c in self.cuts if c != it.data(ROLE)]
             self._fill_cuts()
+            self.save_state()
 
     # ------------------------------------------------------------ page 2
     def _page_choose(self):
@@ -253,6 +351,10 @@ class ReproduceDialog(QDialog):
                                "et je mets un de tes clips qui correspond.")
         self.b_auto.clicked.connect(self.auto_edit)
         self.auto_status = QLabel("")
+        self.b_addclips = QPushButton("➕ Ajouter des clips")
+        self.b_addclips.setToolTip("Ajoute des clips à un couteau, au Dash, au Kunai... : ils vont aussi dans "
+                                   "« Mes clips » et dans la partie Dash / Kunai.")
+        self.b_addclips.clicked.connect(self.add_clips)
         self.b_go.clicked.connect(self._next_seg)
         views = QHBoxLayout()
         lv, rv = QVBoxLayout(), QVBoxLayout()
@@ -273,6 +375,7 @@ class ReproduceDialog(QDialog):
         trow = QHBoxLayout()
         trow.addWidget(self.seg_title, 1)
         trow.addWidget(self.auto_status)
+        trow.addWidget(self.b_addclips)
         trow.addWidget(self.b_auto)
         lay.addLayout(trow)
         lay.addWidget(info)
@@ -296,7 +399,12 @@ class ReproduceDialog(QDialog):
         n = len(self.cuts) + 1
         self.bounds = [0.0] + sorted(self.cuts) + [self.length]
         if len(self.choices) != n:
-            self.choices = [None] * n
+            self.choices = (list(self.choices) + [None] * n)[:n]
+        self._fill_grid()
+        self.stack.setCurrentIndex(1)
+        self._show_seg(0)
+
+    def _fill_grid(self):
         self.grid.clear()
         for name, clips, img in self._pools():
             pix = QPixmap(img) if img and Path(img).is_file() else QPixmap()
@@ -305,8 +413,55 @@ class ReproduceDialog(QDialog):
                                  f"{sym} {name}\n{len(clips)} clip(s)".strip())
             it.setData(ROLE, (name, clips))
             self.grid.addItem(it)
-        self.stack.setCurrentIndex(1)
-        self._show_seg(0)
+
+    def add_clips(self):
+        """Ajoute des clips à une catégorie, synchronisé avec « Mes clips » et les parties Dash / Kunai..."""
+        folders = proj.sync_special_folders(self.project)
+        menu = QMenu(self)
+        for name in sorted(folders, key=str.lower):
+            menu.addAction(f"{proj.SPECIAL_FOLDERS.get(name, '🔪')}  {name}").setData(name)
+        menu.addSeparator()
+        menu.addAction("➕  Nouveau couteau...").setData("")
+        act = menu.exec(self.b_addclips.mapToGlobal(self.b_addclips.rect().bottomLeft()))
+        if act is None:
+            return
+        name = act.data()
+        if not name:
+            name, ok = QInputDialog.getText(self, "Nouveau couteau", "Nom du couteau :")
+            name = name.strip()
+            if not ok or not name:
+                return
+        files, _ = QFileDialog.getOpenFileNames(self, f"Clips à ajouter dans « {name} »", "",
+                                                "Vidéos (*.mp4 *.mov *.mkv *.avi *.webm)")
+        if not files:
+            return
+        attr = proj.SPECIAL_ATTR.get(name)
+        side = None
+        if attr:
+            box = QMessageBox(self)
+            box.setWindowTitle(name)
+            box.setText(f"Ces {len(files)} clip(s) « {name} » sont de quelle main ?")
+            bg = box.addButton("⬅  Main gauche", QMessageBox.ButtonRole.AcceptRole)
+            bd = box.addButton("Main droite  ➡", QMessageBox.ButtonRole.AcceptRole)
+            box.addButton("Annuler", QMessageBox.ButtonRole.RejectRole)
+            box.exec()
+            side = "gauche" if box.clickedButton() is bg else "droite" if box.clickedButton() is bd else None
+            if side is None:
+                return
+        folders = proj.load_clip_folders()
+        lst = folders.setdefault(name, [])
+        new = [f for f in files if f not in lst]
+        lst += new
+        proj.save_clip_folders(folders)
+        where = "Mes clips"
+        if attr:
+            st = getattr(self.project, attr)
+            cur = getattr(st, side)
+            cur += [f for f in files if f not in st.videos]
+            st.sync()
+            where += f" + partie {name} ({side})"
+        self._fill_grid()
+        self.auto_status.setText(f"✓ {len(files)} clip(s) dans « {name} » ({where}).")
 
     def _show_seg(self, i):
         if i < 0:
@@ -344,6 +499,7 @@ class ReproduceDialog(QDialog):
         remapped = [c for c in free if c in saved]
         pool = remapped or free                   # les clips avec time remap déjà fait d'abord
         self.choices[self.seg] = (name, random.choice(pool))
+        self.save_state()
         self._show_pick()
 
     def _overlay(self):
@@ -359,6 +515,7 @@ class ReproduceDialog(QDialog):
             else:
                 self.overlays.pop(self.seg, None)
             self._show_pick()
+            self.save_state()
 
     # ------------------------------------------------------------ edit auto
     def _classes(self):
@@ -435,10 +592,12 @@ class ReproduceDialog(QDialog):
         if other:
             msg += f" ({other} avec un autre couteau, plus de clip libre)"
         self.auto_status.setText(msg + " — vérifie et re-clique un couteau pour changer.")
+        self.save_state()
         self._show_seg(0)
 
     def _skip(self):
         self.choices[self.seg] = None
+        self.save_state()
         self._next_seg()
 
     def _next_seg(self):
@@ -457,9 +616,11 @@ class ReproduceDialog(QDialog):
         self.project.clips = clips
         self.project.overlays = {self.choices[k][1]: ov for k, ov in self.overlays.items()
                                  if k < len(self.choices) and self.choices[k]}
+        self.save_state()
         self.accept()
 
     def done(self, r):
         if self.thread is not None and self.thread.isRunning():
             self.thread.wait()
+        self.save_state()
         super().done(r)
