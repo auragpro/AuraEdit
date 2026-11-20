@@ -1,3 +1,8 @@
+## Nouveautés de la version 0.9.4
+
+- **Reproduire : main gauche ou main droite pour Dash, Kunai, Dash back et Dismiss.** Chaque catégorie a maintenant deux cases : « ⬅ gauche » et « droite ➡ ». Tu cliques celle que tu veux et le clip vient de cette main. Le clip choisi affiche aussi sa main.
+- **Reproduire : bouton « ⏱ Time remap de ce clip »** sous ton clip (ou double-clic sur l'image du clip) pour régler ou changer son time remap sans quitter la page.
+
 ## Nouveautés de la version 0.9.3
 
 - **Time remap : code de courbe comme dans Flow (After Effects).** Nouveau champ « Code Flow » : colle le code copié dans Flow (bouton 📋 Coller), puis applique-le à la courbe 1, à la courbe 2 ou aux deux.

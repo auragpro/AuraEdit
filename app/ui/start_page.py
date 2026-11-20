@@ -13,7 +13,7 @@ from version import __version__
 from .style import RED, asset
 
 WHATS_NEW = [
-    "Time remap : colle un code de courbe Flow",
+    "Reproduire : choisis main gauche ou droite (dash, kunai...)",
     "Fond vert : bords propres, 60 i/s, passage au choix",
     "Fond vert en continuité + Fondu / Dissolve Luma"]
 

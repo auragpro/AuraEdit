@@ -342,6 +342,10 @@ class ReproduceDialog(QDialog):
         b_prev.clicked.connect(lambda: self._show_seg(self.seg - 1))
         self.b_over = QPushButton("🟩 Superposer une vidéo (fond vert)")
         self.b_over.clicked.connect(self._overlay)
+        self.b_remap = QPushButton("⏱ Time remap de ce clip")
+        self.b_remap.setToolTip("Régler ou changer le time remap du clip choisi pour ce plan (double-clic sur le clip aussi).")
+        self.b_remap.clicked.connect(self._remap)
+        self.pick_view.mouseDoubleClickEvent = lambda e: self._remap()
         b_skip = QPushButton("Pas de clip pour ce plan")
         b_skip.clicked.connect(self._skip)
         self.b_go = QPushButton("Plan suivant  →")
@@ -363,7 +367,10 @@ class ReproduceDialog(QDialog):
         rv.addWidget(QLabel("Ton clip"))
         rv.addWidget(self.pick_view)
         rv.addWidget(self.pick_name)
-        rv.addWidget(self.b_over)
+        brow = QHBoxLayout()
+        brow.addWidget(self.b_remap)
+        brow.addWidget(self.b_over)
+        rv.addLayout(brow)
         views.addLayout(lv)
         views.addLayout(rv)
         row = QHBoxLayout()
@@ -409,6 +416,25 @@ class ReproduceDialog(QDialog):
         for name, clips, img in self._pools():
             pix = QPixmap(img) if img and Path(img).is_file() else QPixmap()
             sym = proj.SPECIAL_FOLDERS.get(name, "")
+            attr = proj.SPECIAL_ATTR.get(name)
+            if attr:
+                # Dash / Kunai / Dash back / Dismiss : une case main gauche et une case main droite
+                st = getattr(self.project, attr, None)
+                rest = list(clips)
+                for side, label in (("gauche", "⬅ gauche"), ("droite", "droite ➡")):
+                    part = [c for c in clips if st and c in getattr(st, side, [])]
+                    rest = [c for c in rest if c not in part]
+                    it = QListWidgetItem(f"{sym} {name}\n{label}\n{len(part)} clip(s)")
+                    it.setData(ROLE, (name, part))
+                    if not part:
+                        it.setFlags(it.flags() & ~Qt.ItemFlag.ItemIsEnabled)
+                        it.setToolTip("Aucun clip pour cette main : ajoute-en avec « ➕ Ajouter des clips ».")
+                    self.grid.addItem(it)
+                if rest:
+                    it = QListWidgetItem(f"{sym} {name}\nmain non choisie\n{len(rest)} clip(s)")
+                    it.setData(ROLE, (name, rest))
+                    self.grid.addItem(it)
+                continue
             it = QListWidgetItem(QIcon(pix) if not pix.isNull() else QIcon(),
                                  f"{sym} {name}\n{len(clips)} clip(s)".strip())
             it.setData(ROLE, (name, clips))
@@ -479,6 +505,7 @@ class ReproduceDialog(QDialog):
         ch = self.choices[self.seg]
         ov = self.overlays.get(self.seg)
         self.b_over.setEnabled(bool(ch))
+        self.b_remap.setEnabled(bool(ch))
         self.b_over.setText(f"🟩 Superposition : {Path(ov['fichier']).name}  (modifier)" if ov
                             else "🟩 Superposer une vidéo (fond vert)")
         if not ch:
@@ -487,7 +514,11 @@ class ReproduceDialog(QDialog):
             return
         cat, path = ch
         rm = tr.clip_remaps().get(path)
-        self.pick_name.setText(f"{cat} : {vclip.name(path)}" + ("  (time remap ✓)" if rm else ""))
+        attr = proj.SPECIAL_ATTR.get(cat)
+        st = getattr(self.project, attr, None) if attr else None
+        side = ("  ⬅ main gauche" if st and path in st.gauche else
+                "  main droite ➡" if st and path in st.droite else "")
+        self.pick_name.setText(f"{cat}{side} : {vclip.name(path)}" + ("  (time remap ✓)" if rm else ""))
         self.pick_view.show_at(path, float(rm["debut"]) if rm else 0.5)
 
     def _pick(self, item):
@@ -500,6 +531,22 @@ class ReproduceDialog(QDialog):
         pool = remapped or free                   # les clips avec time remap déjà fait d'abord
         self.choices[self.seg] = (name, random.choice(pool))
         self.save_state()
+        self._show_pick()
+
+    def _remap(self):
+        """Ouvre le time remap du clip choisi pour ce plan (pour le régler ou le changer)."""
+        ch = self.choices[self.seg] if 0 <= self.seg < len(self.choices) else None
+        if not ch:
+            return
+        from .timeremap_dialog import TimeRemapDialog
+        cat, path = ch
+        mode = {"Kunai": "kunai", "Dash back": "dashback", "Dismiss": "dismiss"}.get(cat)
+        if mode:
+            dlg = TimeRemapDialog(self.project, path, None, (), self, mode=mode)
+        else:
+            knives = [n for n in proj.load_clip_folders() if n not in proj.SPECIAL_FOLDERS]
+            dlg = TimeRemapDialog(self.project, path, None if cat == "Dash" else cat, knives, self)
+        dlg.exec()
         self._show_pick()
 
     def _overlay(self):
