@@ -100,6 +100,7 @@ class Project:
     render: dict = field(default_factory=dict)          # dernier rendu : fichier + coupes (pour les shakes)
     remaps: dict = field(default_factory=dict)
     shakes: dict = field(default_factory=dict)          # {"actif", "in", "out", "duree", "seed"}
+    overlays: dict = field(default_factory=dict)        # {clip: réglages chroma} vidéo superposée (fond vert)
     markers: list = field(default_factory=list)         # [{"t", "type": clip|dash|kunai}] sur la musique          # {clip: {"couteau", "debut", "fin"}} time remap
     path: str | None = None                             # fichier .auraedit (non sauvegardé dedans)
 
@@ -153,6 +154,7 @@ class Project:
             render=data.get("render") if isinstance(data.get("render"), dict) else {},
             remaps=data.get("remaps") if isinstance(data.get("remaps"), dict) else {},
             shakes=data.get("shakes") if isinstance(data.get("shakes"), dict) else {},
+            overlays=data.get("overlays") if isinstance(data.get("overlays"), dict) else {},
             markers=[m for m in data.get("markers") or [] if isinstance(m, dict) and "t" in m],
             path=str(path),
         )

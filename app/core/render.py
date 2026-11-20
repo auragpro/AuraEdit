@@ -58,6 +58,24 @@ def segments(project):
     return [(k, p) for k, p in segs if p and vclip.exists(p)]
 
 
+def _overlay(project, kind, path, part, tmp, i, steps, n, progress, is_cancelled):
+    """Si une vidéo est superposée sur ce clip (fond vert), on l'incruste dans le morceau préparé."""
+    ov = (getattr(project, "overlays", None) or {}).get(path) if kind == "clip" else None
+    if not ov or not ov.get("fichier") or not Path(ov["fichier"]).is_file():
+        return part
+    from . import chroma
+    out = tmp / f"{i:04d}_ov.mp4"
+    try:
+        chroma.apply(part, out, ov, W, H, FPS, is_cancelled,
+                     (lambda f: progress((i + f) / steps, f"Clip {i + 1}/{n} — superposition fond vert"))
+                     if progress else None, int(duration(part) * FPS))
+    except InterruptedError:
+        raise Cancelled()
+    except (RuntimeError, OSError) as e:
+        raise RenderError(f"Superposition impossible sur {vclip.name(path)} :\n{e}")
+    return out
+
+
 def render(project, output, progress=None, is_cancelled=None, export=None):
     """Fabrique le MP4. Renvoie {"fichier", "coupes": [s...], "segments": [...]}."""
     segs = segments(project)
@@ -88,6 +106,7 @@ def render(project, output, progress=None, is_cancelled=None, export=None):
                     raise Cancelled()
                 except (ValueError, KeyError, OSError) as e:
                     raise RenderError(f"Time remap impossible pour {vclip.name(path)} :\n{e}")
+                part = _overlay(project, kind, path, part, tmp, i, steps, len(segs), progress, is_cancelled)
                 d = duration(part)
                 info.append({"type": kind, "fichier": str(path), "debut": round(t, 3), "duree": round(d, 3),
                              "time_remap": True})
@@ -96,6 +115,7 @@ def render(project, output, progress=None, is_cancelled=None, export=None):
                 continue
             _run([ff, "-y", "-hide_banner", *vclip.input_args(path), "-an", "-vf", vf, "-c:v", "libx264",
                   "-preset", "veryfast", "-crf", "10", str(part)], is_cancelled)
+            part = _overlay(project, kind, path, part, tmp, i, steps, len(segs), progress, is_cancelled)
             d = duration(part)
             info.append({"type": kind, "fichier": str(path), "debut": round(t, 3), "duree": round(d, 3)})
             parts.append(part)

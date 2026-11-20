@@ -1,3 +1,12 @@
+## Nouveautés de la version 0.8.7
+
+- **Superposer une vidéo sur un clip, avec fond vert enlevé** (dans « Reproduire un edit », quand tu places tes clips).
+  - Bouton **🟩 Superposer une vidéo (fond vert)** sous ton clip, pour chaque plan.
+  - **Choisis la couleur à enlever** : 🎯 pipette (clique sur le fond dans l'aperçu), **Auto** (détecte le fond) ou nuancier. Marche avec le vert, le bleu ou n'importe quelle couleur.
+  - Détourage propre façon **Keylight** : tolérance, douceur du masque, rétrécir et adoucir les bords, vue **Masque** noir/blanc pour vérifier que le fond part bien.
+  - **Suppression du débordement** façon Advanced Spill Suppressor : enlève le reflet vert sur le sujet en gardant sa luminosité.
+  - Taille, position, début dans la vidéo et répétition si elle est plus courte que le plan.
+
 ## Nouveautés de la version 0.8.6
 
 - **Plus aucune copie de clips sur ton PC.**

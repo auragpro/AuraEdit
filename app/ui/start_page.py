@@ -13,9 +13,9 @@ from version import __version__
 from .style import RED, asset
 
 WHATS_NEW = [
-    "Plus aucune copie de clips sur ton PC",
-    "Les dash coupés restent dans l'app, sans fichier",
-    "Anciennes copies converties puis supprimées"]
+    "Superposer une vidéo sur un clip (Reproduire un edit)",
+    "Fond vert enlevé proprement, couleur au choix (pipette)",
+    "Suppression du débordement façon After Effects"]
 
 
 def ago(ts):

@@ -76,6 +76,7 @@ class ReproduceDialog(QDialog):
         self.path, self.length, self.fps = None, 0.0, 60.0
         self.cuts = []
         self.choices = []                 # par plan : (catégorie, chemin) ou None
+        self.overlays = {}                # par plan : réglages de la vidéo superposée (fond vert)
         self.seg = 0
         self.thread = None
         self.stack = QStackedWidget()
@@ -221,6 +222,8 @@ class ReproduceDialog(QDialog):
         self.grid.itemClicked.connect(self._pick)
         b_prev = QPushButton("←  Plan précédent")
         b_prev.clicked.connect(lambda: self._show_seg(self.seg - 1))
+        self.b_over = QPushButton("🟩 Superposer une vidéo (fond vert)")
+        self.b_over.clicked.connect(self._overlay)
         b_skip = QPushButton("Pas de clip pour ce plan")
         b_skip.clicked.connect(self._skip)
         self.b_go = QPushButton("Plan suivant  →")
@@ -233,6 +236,7 @@ class ReproduceDialog(QDialog):
         rv.addWidget(QLabel("Ton clip"))
         rv.addWidget(self.pick_view)
         rv.addWidget(self.pick_name)
+        rv.addWidget(self.b_over)
         views.addLayout(lv)
         views.addLayout(rv)
         row = QHBoxLayout()
@@ -289,6 +293,10 @@ class ReproduceDialog(QDialog):
 
     def _show_pick(self):
         ch = self.choices[self.seg]
+        ov = self.overlays.get(self.seg)
+        self.b_over.setEnabled(bool(ch))
+        self.b_over.setText(f"🟩 Superposition : {Path(ov['fichier']).name}  (modifier)" if ov
+                            else "🟩 Superposer une vidéo (fond vert)")
         if not ch:
             self.pick_name.setText("Aucun clip choisi pour ce plan.")
             self.pick_view.clear()
@@ -309,6 +317,20 @@ class ReproduceDialog(QDialog):
         self.choices[self.seg] = (name, random.choice(pool))
         self._show_pick()
 
+    def _overlay(self):
+        ch = self.choices[self.seg]
+        if not ch:
+            return
+        from .overlay_dialog import OverlayDialog
+        rm = tr.clip_remaps().get(ch[1])
+        dlg = OverlayDialog(ch[1], float(rm["debut"]) if rm else 0.5, self.overlays.get(self.seg), self)
+        if dlg.exec():
+            if dlg.result:
+                self.overlays[self.seg] = dlg.result
+            else:
+                self.overlays.pop(self.seg, None)
+            self._show_pick()
+
     def _skip(self):
         self.choices[self.seg] = None
         self._next_seg()
@@ -327,6 +349,8 @@ class ReproduceDialog(QDialog):
             if c in saved:
                 self.project.remaps[c] = saved[c]
         self.project.clips = clips
+        self.project.overlays = {self.choices[k][1]: ov for k, ov in self.overlays.items()
+                                 if k < len(self.choices) and self.choices[k]}
         self.accept()
 
     def done(self, r):
