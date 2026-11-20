@@ -1,3 +1,13 @@
+## Nouveautés de la version 0.8.3
+
+- **Détection des dash refaite et réglée sur ta vraie compilation** (« compil dash AURA FARM ») :
+  - La coupe tombe sur **la frame où l'arme disparaît et où la main du dash commence** : la frame d'avant montre encore l'arme.
+  - Sur cette compilation, **48 dash sur 49 tombent exactement à la bonne frame**.
+  - Un tir (flash, recul) n'est plus pris pour un dash. Un clip qui commence déjà en plein dash est ignoré.
+  - Il ne dépend plus des bannières de kill, qui étaient vues trop tard.
+  - Toutes les frames de la vidéo sont lues (120/144 i/s compris).
+- Il peut rester quelques coupes en trop : supprime-les avec 🗑 avant d'enregistrer.
+
 ## Nouveautés de la version 0.8.2
 
 - **Coupe des dash à la frame près** :

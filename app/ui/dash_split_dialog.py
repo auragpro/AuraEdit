@@ -19,74 +19,95 @@ ROLE = Qt.ItemDataRole.UserRole
 FPS = tr.FPS
 
 
-def _native_region(path, t0, count, sfps):
-    """Zone des mains à la cadence réelle de la vidéo (toutes les frames), à partir de la frame t0*sfps."""
-    p = subprocess.run([audio.ffmpeg_exe(), "-hide_banner", "-loglevel", "error",
-                        "-ss", f"{max(0.0, t0 - 0.3 / sfps):.6f}", "-i", str(path), "-an",
-                        "-frames:v", str(count), "-vf", tr.REGION, "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
-                       capture_output=True, creationflags=audio._NO_WINDOW)
-    size = tr.RW * tr.RH * 3
-    data = np.frombuffer(p.stdout, dtype=np.uint8)
-    n = len(data) // size
-    return tr._norm(data[:n * size].reshape(n, size))
+SW, SH = 320, 180
 
 
-def _refine(path, tc, kill_t, sfps):
-    """Frame exacte (cadence réelle) où la main du dash apparaît, autour de tc (estimation à 60 i/s).
-    Chaque frame est comparée à « l'arme » (frames juste avant) et à « la main » (frames juste après) :
-    la coupe = 1re frame plus proche de la main que de l'arme, et qui le reste. Jamais avant le kill."""
-    f0 = max(0, int(round((tc - 0.30) * sfps)))
-    F = _native_region(path, f0 / sfps, int(0.6 * sfps) + 2, sfps)
-    n = len(F)
-    if n < 10:
-        return tc
-    c = int(round(tc * sfps)) - f0                      # position estimée dans la fenêtre
-    w0, w1 = max(0, c - int(0.25 * sfps)), max(1, c - int(0.06 * sfps))
-    h0, h1 = min(n - 1, c + int(0.05 * sfps)), min(n, c + int(0.16 * sfps))
-    if w1 <= w0 or h1 <= h0:
-        return tc
-    W = F[w0:w1].mean(axis=0)
-    W /= np.linalg.norm(W) + 1e-6
-    H = F[h0:h1].mean(axis=0)
-    H /= np.linalg.norm(H) + 1e-6
-    closer = (F @ H) - (F @ W) > 0                     # vrai = ressemble plus à la main qu'à l'arme
-    lo = max(w1, int(np.floor(kill_t * sfps)) - f0 + 1 if kill_t is not None else 0)
-    for j in range(lo, n - 2):
-        if closer[j] and closer[j + 1] and closer[j + 2]:
-            return (f0 + j) / sfps
-    return tc
+
+def _feats(path):
+    """Une seule lecture de la vidéo (toutes les frames, 320x180) -> caractéristiques par frame."""
+    p = subprocess.Popen([audio.ffmpeg_exe(), "-hide_banner", "-loglevel", "error", "-i", str(path), "-an",
+                          "-vf", f"scale={SW}:{SH}", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
+                         stdout=subprocess.PIPE, creationflags=audio._NO_WINDOW)
+    size = SW * SH * 3
+    sharp, hist, BR, BOT = [], [], [], []
+    while True:
+        buf = p.stdout.read(size * 240)
+        if not buf:
+            break
+        m = len(buf) // size
+        f = np.frombuffer(buf[:m * size], np.uint8).reshape(m, SH, SW, 3)
+        g = f.astype(np.float32).mean(axis=3)
+        c = g[:, int(SH * .15):int(SH * .75), int(SW * .1):int(SW * .9)]
+        sharp.append(np.abs(np.diff(c, axis=2)).mean((1, 2)) + np.abs(np.diff(c, axis=1)).mean((1, 2)))
+        q = (f[:, ::4, ::4] // 32).astype(np.int32)
+        idx = (q[..., 0] * 64 + q[..., 1] * 8 + q[..., 2]).reshape(m, -1)
+        h = np.stack([np.bincount(r, minlength=512) for r in idx]).astype(np.float32)
+        hist.append(h / h.sum(1, keepdims=True))
+        br = f[:, int(SH * .5)::3, int(SW * .55)::3].reshape(m, -1).astype(np.float32)
+        bot = f[:, int(SH * .58)::3, ::3].reshape(m, -1).astype(np.float32)
+        for arr, out in ((br, BR), (bot, BOT)):
+            arr -= arr.mean(1, keepdims=True)
+            arr /= np.linalg.norm(arr, axis=1, keepdims=True) + 1e-6
+            out.append(arr)
+    p.wait()
+    if not sharp:
+        return None
+    return np.concatenate(sharp), np.concatenate(hist), np.concatenate(BR), np.concatenate(BOT)
+
+
+def _detect(path, sfps):
+    """Numéros de frame (cadence réelle) de la 1re frame de chaque dash :
+    l'arme disparaît d'un coup (gros changement en bas de l'image) ET l'image perd de la netteté
+    (le dash floute), alors qu'un tir change l'arme sans flouter. Une frame avant = l'arme."""
+    r = _feats(path)
+    if r is None:
+        return [], 0
+    s, h, b, a = r
+    n = len(s)
+    d = np.zeros(n)
+    d[1:] = 0.5 * np.abs(np.diff(h, axis=0)).sum(1)
+    cuts = [0]
+    for i in range(1, n):
+        if d[i] > 0.3 and i - cuts[-1] > 20:
+            cuts.append(i)
+    seg_start = np.zeros(n, int)
+    k = 0
+    for i in range(n):
+        while k + 1 < len(cuts) and cuts[k + 1] <= i:
+            k += 1
+        seg_start[i] = cuts[k]
+    cb = np.ones(n)
+    ca = np.ones(n)
+    cb[1:] = (b[1:] * b[:-1]).sum(1)
+    ca[1:] = (a[1:] * a[:-1]).sum(1)
+    refr = int(0.9 * sfps)
+    out, last = [], -10 ** 9
+    for j in range(8, n - 2):
+        a0 = seg_start[j]
+        nxt = next((c for c in cuts if c > j), n)
+        if cb[j] > 0.995 or j - a0 < 4 or nxt - j < 6:      # doublon / trop près d'un changement de clip
+            continue
+        sr = s[j] / (np.median(s[max(a0, j - 6):j]) + 1e-6)
+        if sr >= 0.93 or not (cb[j] < 0.65 or ca[j] < 0.8):
+            continue
+        st = float(np.median(b[max(a0, j - 8):j - 1] @ b[j - 1])) if j - 1 > a0 else 1.0
+        if st < 0.25:                 # juste avant, l'image bougeait déjà (dash déjà commencé)
+            continue
+        if a0 > last or j - last > refr:
+            out.append(j)
+            last = j
+    return out, n
 
 
 def dash_starts(path):
-    """1re frame de chaque dash (en secondes, sur une frame exacte de la vidéo) = la frame où l'arme
-    disparaît et où la main du dash apparaît, juste après la bannière de kill."""
-    a = tr.Analysis(path)
-    n, kills = a.n, a.kills
+    """1re frame de chaque dash (en secondes, sur une frame exacte de la vidéo).
+    Réglé sur une vraie compilation (49 dash vérifiés à l'œil) : la frame où l'arme disparaît
+    et où la main du dash commence, la frame d'avant montre encore l'arme."""
     sfps = float(tr.source_fps(path))
-    sw = [i for i in range(10, n - 9) if a._switch(i)]
-    picks = []                                       # (frame 60 i/s, kill 60 i/s ou None)
-    if kills:
-        for k in kills:
-            c = [i for i in sw if k < i <= k + 3 * FPS]
-            if c:
-                picks.append((c[0], k))
-    else:
-        last = -10 ** 9
-        for i in sw:
-            if i - last > 1.2 * FPS:
-                picks.append((i, None))
-                last = i
-    starts = []
-    for i, k in picks:
-        lo = max(1, i - 4)                           # 1re frame (60 i/s) qui ne ressemble plus à l'arme
-        before = a.F[max(0, lo - 10):lo].mean(axis=0)
-        before /= np.linalg.norm(before) + 1e-6
-        j = next((x for x in range(lo, min(n, i + 4)) if float(a.F[x] @ before) < 0.6), i)
-        t = _refine(path, j / FPS, None if k is None else k / FPS, sfps)
-        t = round(t * sfps) / sfps
-        if not starts or t - starts[-1] > 0.4:
-            starts.append(t)
-    return starts, n / FPS, kills
+    frames, n = _detect(path, sfps)
+    if n < 4:
+        raise ValueError("Vidéo illisible ou trop courte.")
+    return [f / sfps for f in frames], n / sfps, []
 
 
 class DetectThread(QThread):
@@ -100,7 +121,7 @@ class DetectThread(QThread):
     def run(self):
         try:
             s, length, kills = dash_starts(self.path)
-            self.done.emit(s, length, [k / FPS for k in kills])
+            self.done.emit(s, length, kills)
         except Exception as e:                              # noqa: BLE001
             self.failed.emit(str(e))
 
@@ -219,7 +240,7 @@ class DashSplitDialog(QDialog):
         if not f or self._busy():
             return
         self.path = f
-        self.status.setText("Je cherche les kills et les dash...")
+        self.status.setText("Je cherche les dash (lecture de toutes les frames, ça peut prendre une minute)...")
         self.thread = DetectThread(f, self)
         self.thread.done.connect(self._found)
         self.thread.failed.connect(lambda m: self.status.setText(f"Détection impossible : {m}"))
@@ -232,9 +253,7 @@ class DashSplitDialog(QDialog):
         self.slider.setEnabled(True)
         self._fill()
         self._goto(self.cuts[0] if self.cuts else 0.0)
-        extra = "" if len(kills) == len(starts) else \
-            f" Attention : {len(kills)} kill(s) vu(s) pour {len(starts)} dash, vérifie bien."
-        self.status.setText(f"{len(starts)} dash trouvé(s).{extra}")
+        self.status.setText(f"{len(starts)} dash trouvé(s). Vérifie chaque coupe (clique-la dans la liste).")
 
     def _fill(self):
         self.cuts.sort()
