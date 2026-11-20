@@ -1,8 +1,12 @@
-"""Edit auto : on regarde chaque plan de l'edit fini et on reconnaît ce que c'est
-(quel couteau, un kunai, un dash main gauche / droite...), en le comparant à tes propres clips.
+"""Edit auto : on regarde chaque plan de l'edit fini et on reconnaît ce que c'est, en le comparant à tes clips.
 
-On compare surtout le bas de l'image (là où sont l'arme, le couteau, la main du dash), moitié gauche et
-moitié droite séparément : un dash main gauche et un dash main droite ne se ressemblent donc pas.
+Deux étapes :
+1. la CATÉGORIE (flick couteau, kunai, dash, dash back, dismiss) : surtout la FORME de ce qu'on a en main
+   (contours du bas de l'image, gauche et droite séparés), peu la couleur ;
+2. dans les flicks, QUEL couteau : là la couleur du skin compte beaucoup.
+
+Pour les couteaux on apprend sur les images où le couteau est sorti (début du time remap, image de
+référence du couteau), pas sur les moments où le joueur tient encore son arme.
 """
 import subprocess
 from concurrent.futures import ThreadPoolExecutor
@@ -13,25 +17,17 @@ from . import audio, vclip
 
 SW, SH = 160, 90
 EDIT_FPS = 10
+CLIP_FPS = 6
+FLICK = "Flick"
 
 
-def _grab(path, t):
-    p = subprocess.run([audio.ffmpeg_exe(), "-hide_banner", "-loglevel", "error",
-                        *vclip.input_args(path, ss=max(0.0, t)), "-frames:v", "1", "-vf",
-                        f"scale={SW}:{SH},format=rgb24", "-f", "rawvideo", "-"],
-                       capture_output=True, creationflags=audio._NO_WINDOW)
-    if len(p.stdout) < SW * SH * 3:
-        return None
-    return np.frombuffer(p.stdout[:SW * SH * 3], np.uint8).reshape(SH, SW, 3)
-
-
-def _image(file):
-    p = subprocess.run([audio.ffmpeg_exe(), "-hide_banner", "-loglevel", "error", "-i", str(file),
-                        "-frames:v", "1", "-vf", f"scale={SW}:{SH},format=rgb24", "-f", "rawvideo", "-"],
-                       capture_output=True, creationflags=audio._NO_WINDOW)
-    if len(p.stdout) < SW * SH * 3:
-        return None
-    return np.frombuffer(p.stdout[:SW * SH * 3], np.uint8).reshape(SH, SW, 3)
+def _frames(path, fps=CLIP_FPS, file=False):
+    args = ["-i", str(path)] if file else vclip.input_args(path)
+    vf = f"scale={SW}:{SH},format=rgb24" if file else f"fps={fps},scale={SW}:{SH},format=rgb24"
+    p = subprocess.run([audio.ffmpeg_exe(), "-hide_banner", "-loglevel", "error", *args, "-an", "-vf", vf,
+                        "-f", "rawvideo", "-"], capture_output=True, creationflags=audio._NO_WINDOW)
+    n = len(p.stdout) // (SW * SH * 3)
+    return np.frombuffer(p.stdout[:n * SW * SH * 3], np.uint8).reshape(n, SH, SW, 3)
 
 
 def _hue_sat(img):
@@ -44,77 +40,101 @@ def _hue_sat(img):
     return h, s
 
 
+Y0 = int(SH * 0.4)          # on regarde le bas de l'image (arme, couteau, main)
+
+
 def desc(img):
+    """(forme, couleur) du bas de l'image."""
+    g = img.astype(np.float32) @ np.array([0.299, 0.587, 0.114], np.float32)
+    gy, gx = np.gradient(g)
+    mag = np.hypot(gx, gy)[Y0:]
+    ang = (np.arctan2(gy, gx) % np.pi)[Y0:]
+    b = np.minimum((ang / np.pi * 8).astype(int), 7)
+    cells = []
+    for rows in np.array_split(np.arange(mag.shape[0]), 3):
+        for cols in np.array_split(np.arange(SW), 6):
+            m = mag[np.ix_(rows, cols)].ravel()
+            cells.append(np.bincount(b[np.ix_(rows, cols)].ravel(), weights=m, minlength=8))
+    hog = np.sqrt(np.concatenate(cells))
+    hog /= np.linalg.norm(hog) + 1e-6
     hue, sat = _hue_sat(img)
-    hists = []
+    cols = []
     for x0, x1 in ((0, SW // 2), (SW // 2, SW)):
-        h, _, _ = np.histogram2d(hue[SH // 2:, x0:x1].ravel(), sat[SH // 2:, x0:x1].ravel(), bins=[18, 4],
+        h, _, _ = np.histogram2d(hue[Y0:, x0:x1].ravel(), sat[Y0:, x0:x1].ravel(), bins=[18, 4],
                                  range=[[0, 180], [0, 1.0001]])
         h = h.ravel().astype(np.float32)
-        hists.append(h / (h.sum() + 1e-6))
-    g = (img.astype(np.float32) @ np.array([0.299, 0.587, 0.114], np.float32))[SH // 2:]
-    g = g.reshape(9, 5, 32, 5).mean(axis=(1, 3)).ravel()
-    g = (g - g.mean()) / (g.std() + 1e-6)
-    return np.concatenate(hists), g
+        cols.append(h / (h.sum() + 1e-6))
+    return hog.astype(np.float32), np.concatenate(cols)
 
 
-def sim(a, b):
-    hi = np.minimum(a[0], b[0]).sum() / 2                    # 0..1
-    co = float(np.dot(a[1], b[1]) / len(a[1]))               # -1..1
-    return 0.65 * hi + 0.35 * (co + 1) / 2
+def s_form(a, b):
+    return float(np.dot(a[0], b[0]))
 
 
-def edit_frames(path):
-    p = subprocess.run([audio.ffmpeg_exe(), "-hide_banner", "-loglevel", "error", "-i", str(path), "-an",
-                        "-vf", f"fps={EDIT_FPS},scale={SW}:{SH},format=rgb24", "-f", "rawvideo", "-"],
-                       capture_output=True, creationflags=audio._NO_WINDOW)
-    n = len(p.stdout) // (SW * SH * 3)
-    return np.frombuffer(p.stdout[:n * SW * SH * 3], np.uint8).reshape(n, SH, SW, 3)
+def s_color(a, b):
+    return float(np.minimum(a[1], b[1]).sum() / 2)
 
 
-def analyse(edit, bounds, classes, remaps, durations, progress=None, cancelled=None):
-    """classes : {clé: {"clips": [...], "image": fichier ou None}}.
-    Renvoie, pour chaque plan, la liste des clés triées du plus ressemblant au moins ressemblant."""
-    jobs = []                                                 # (clé, chemin, t)
-    for key, c in classes.items():
-        for clip in c["clips"][:5]:
-            rm = remaps.get(clip)
-            d = durations.get(clip) or 2.0
-            ts = [float(rm["debut"]) + 0.1] if rm else []
-            ts += [d * 0.35, d * 0.65]
-            jobs += [(key, clip, t) for t in ts]
+def _ref_times(clip, rm, special, n):
+    """Indices des images à apprendre dans un clip décodé à CLIP_FPS."""
+    if n == 0:
+        return []
+    if rm and not special:
+        a, b = float(rm["debut"]), float(rm["fin"])
+        ts = [a, a + 0.1, a + 0.2, a + 0.35, max(a, b - 0.1)]
+        return sorted({min(n - 1, max(0, int(t * CLIP_FPS))) for t in ts})
+    lo, hi = (0.15, 0.85) if special else (0.35, 0.97)          # couteau sans time remap : plutôt la fin
+    return sorted({min(n - 1, int(n * (lo + (hi - lo) * k / 5))) for k in range(6)})
+
+
+def analyse(edit, bounds, classes, remaps, progress=None, cancelled=None):
+    """classes : {clé: {"clips", "image", "pool", "special"}}.
+    Renvoie, pour chaque plan, les clés triées : d'abord celles de la bonne catégorie (la meilleure en tête)."""
     refs = {k: [] for k in classes}
     for key, c in classes.items():
-        img = _image(c["image"]) if c.get("image") else None
-        if img is not None:
-            refs[key].append(desc(img))
+        if c.get("image"):
+            f = _frames(c["image"], file=True)
+            if len(f):
+                refs[key] += [desc(f[0])] * 2           # l'image de référence du couteau compte double
+    jobs = [(key, clip) for key, c in classes.items() for clip in c["clips"][:8]]
     done = 0
     with ThreadPoolExecutor(6) as ex:
-        futs = [(key, ex.submit(_grab, clip, t)) for key, clip, t in jobs]
-        for key, f in futs:
-            img = f.result()
-            if img is not None:
-                refs[key].append(desc(img))
+        futs = [(key, clip, ex.submit(_frames, clip)) for key, clip in jobs]
+        for key, clip, f in futs:
+            fr = f.result()
+            for i in _ref_times(clip, remaps.get(clip), classes[key]["special"], len(fr)):
+                refs[key].append(desc(fr[i]))
             done += 1
-            if progress and done % 4 == 0:
+            if progress:
                 progress(0.8 * done / max(1, len(futs)), "J'apprends tes clips...")
             if cancelled and cancelled():
                 raise InterruptedError()
     if progress:
         progress(0.8, "Je regarde l'edit...")
-    frames = edit_frames(edit)
+    frames = _frames(edit, EDIT_FPS)
+    cat = {k: (c["pool"] if c["special"] else FLICK) for k, c in classes.items()}
     out = []
     for i in range(len(bounds) - 1):
         a, b = bounds[i], bounds[i + 1]
-        idx = sorted({min(len(frames) - 1, max(0, int((a + (b - a) * f) * EDIT_FPS))) for f in (0.3, 0.5, 0.75)})
-        ds = [desc(frames[j]) for j in idx] if len(frames) else []
-        scores = {}
+        idx = sorted({min(len(frames) - 1, max(0, int((a + (b - a) * f) * EDIT_FPS)))
+                      for f in (0.2, 0.35, 0.5, 0.65, 0.8)}) if len(frames) else []
+        ds = [desc(frames[j]) for j in idx]
+        form, kn = {}, {}
         for key, rl in refs.items():
             if not rl or not ds:
-                scores[key] = -1
+                form[key] = kn[key] = -1.0
                 continue
-            scores[key] = float(np.mean([max(sim(d, r) for r in rl) for d in ds]))
-        out.append(sorted(scores, key=lambda k: -scores[k]))
+            # pour chaque image du plan : la meilleure ressemblance ; puis la moyenne sur le plan
+            form[key] = float(np.mean([max(0.8 * s_form(d, r) + 0.2 * s_color(d, r) for r in rl) for d in ds]))
+            kn[key] = float(np.mean([max(0.4 * s_form(d, r) + 0.6 * s_color(d, r) for r in rl) for d in ds]))
+        cats = {}
+        for key, v in form.items():
+            cats[cat[key]] = max(cats.get(cat[key], -1.0), v)
+        best = max(cats, key=cats.get) if cats else None
+        inside = [k for k in classes if cat[k] == best]
+        inside.sort(key=lambda k: -(kn[k] if best == FLICK else form[k]))
+        others = sorted([k for k in classes if cat[k] != best], key=lambda k: -form[k])
+        out.append(inside + others)
     if progress:
         progress(1.0, "Terminé")
     return out

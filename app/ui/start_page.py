@@ -13,9 +13,9 @@ from version import __version__
 from .style import RED, asset
 
 WHATS_NEW = [
-    "🤖 Edit auto : l'app reconnaît chaque plan de l'edit",
-    "Même couteau, kunai, dash du même côté",
-    "Autre couteau si plus de clip libre"]
+    "Edit auto : flick, kunai et dash bien reconnus",
+    "Fond vert : bords propres, 60 i/s, passage au choix",
+    "Fond vert en continuité + Fondu / Dissolve Luma"]
 
 
 def ago(ts):

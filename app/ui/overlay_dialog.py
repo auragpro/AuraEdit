@@ -1,12 +1,14 @@
-"""Fenêtre « Superposer une vidéo » : on choisit une vidéo (fond vert ou autre), la couleur à enlever
-(pipette, auto ou nuancier) et on règle le détourage comme Keylight + Advanced Spill Suppressor."""
+"""Fenêtre « Superposer une vidéo » : on choisit une vidéo (fond vert ou autre), le passage à garder,
+la couleur à enlever (pipette, auto ou nuancier), le détourage façon Keylight + Advanced Spill Suppressor,
+et l'apparition / disparition (fondu ou Dissolve Luma)."""
 from pathlib import Path
 
 import numpy as np
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QColor, QImage, QPixmap
-from PyQt6.QtWidgets import (QCheckBox, QColorDialog, QComboBox, QDialog, QFileDialog, QFormLayout, QHBoxLayout,
-                             QLabel, QPushButton, QSlider, QVBoxLayout, QWidget)
+from PyQt6.QtWidgets import (QCheckBox, QColorDialog, QComboBox, QDialog, QDoubleSpinBox, QFileDialog,
+                             QFormLayout, QHBoxLayout, QLabel, QPushButton, QScrollArea, QSlider, QVBoxLayout,
+                             QWidget)
 
 from app.core import chroma, vclip
 
@@ -30,12 +32,13 @@ class OverlayDialog(QDialog):
     def __init__(self, clip, t_clip, cfg=None, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Superposer une vidéo (fond vert)")
+        self.resize(1250, 760)
         self.clip, self.t_clip = clip, t_clip
         self.cfg = chroma.cfg_full(cfg)
         self.result = None
-        self.bg = None
+        self.length = 0.0
         self.fg_raw = None
-        self.shown = None
+        self.noise = None
         self.picking = False
 
         self.view = Canvas(self._clicked)
@@ -70,9 +73,33 @@ class OverlayDialog(QDialog):
             self.mode.addItem(label)
         self.mode.currentIndexChanged.connect(lambda _: self._redraw())
 
-        self.sl = {}
         form = QFormLayout()
+        # --- passage de la vidéo
+        self.s_a, self.l_a = self._time_slider("debut")
+        self.s_b, self.l_b = self._time_slider("fin")
+        self.s_p = QSlider(Qt.Orientation.Horizontal)
+        self.s_p.valueChanged.connect(lambda _: self.ftimer.start(90))
+        self.l_p = QLabel("")
+        form.addRow(self._title("Passage de la vidéo"))
+        form.addRow("Début", self._row(self.s_a, self.l_a))
+        form.addRow("Fin", self._row(self.s_b, self.l_b))
+        form.addRow("Aperçu à", self._row(self.s_p, self.l_p))
+        self.c_cont = QCheckBox("Continuer sur les clips suivants (sans s'arrêter à la fin du clip)")
+        self.c_cont.setChecked(bool(self.cfg["continuer"]))
+        self.c_cont.toggled.connect(self._cont)
+        self.c_loop = QCheckBox("Répéter si elle est plus courte que le clip")
+        self.c_loop.setChecked(bool(self.cfg["boucle"]))
+        self.c_loop.toggled.connect(lambda v: self.cfg.__setitem__("boucle", v))
+        self.c_fluid = QCheckBox("Fluidifier en 60 i/s si la vidéo est en 30 i/s (interpolation)")
+        self.c_fluid.setChecked(bool(self.cfg["fluide"]))
+        self.c_fluid.toggled.connect(lambda v: self.cfg.__setitem__("fluide", v))
+        form.addRow("", self.c_cont)
+        form.addRow("", self.c_loop)
+        form.addRow("", self.c_fluid)
+        # --- détourage
+        form.addRow(self._title("Détourage"))
         form.addRow("Couleur du fond à enlever", crow)
+        self.sl = {}
         for key, label, lo, hi in [("tolerance", "Tolérance", 0, 100), ("douceur", "Douceur du masque", 0, 100),
                                    ("retrecir", "Rétrécir les bords (px)", 0, 10),
                                    ("adoucir", "Adoucir les bords", 0, 10),
@@ -85,25 +112,25 @@ class OverlayDialog(QDialog):
             val = QLabel(str(s.value()))
             val.setFixedWidth(34)
             s.valueChanged.connect(lambda v, k=key, lab=val: self._set(k, v, lab))
-            row = QHBoxLayout()
-            row.addWidget(s)
-            row.addWidget(val)
-            form.addRow(label, row)
+            form.addRow(label, self._row(s, val))
             self.sl[key] = s
-        self.s_start = QSlider(Qt.Orientation.Horizontal)
-        self.s_start.setRange(0, 0)
-        self.s_start.setValue(int(float(self.cfg["debut"]) * 100))
-        self.s_start.valueChanged.connect(self._start_moved)
-        self.l_start = QLabel("0.00 s")
-        rs = QHBoxLayout()
-        rs.addWidget(self.s_start)
-        rs.addWidget(self.l_start)
-        form.addRow("Début dans la vidéo", rs)
-        self.c_loop = QCheckBox("Répéter la vidéo si elle est plus courte que le plan")
-        self.c_loop.setChecked(bool(self.cfg["boucle"]))
-        self.c_loop.toggled.connect(lambda v: self.cfg.__setitem__("boucle", v))
-        form.addRow("", self.c_loop)
         form.addRow("Affichage", self.mode)
+        # --- apparition / disparition
+        form.addRow(self._title("Apparition / disparition"))
+        for k in ("entree", "sortie"):
+            cb = QComboBox()
+            for code, label in chroma.TRANSITIONS:
+                cb.addItem(label, code)
+            cb.setCurrentIndex(max(0, [c for c, _ in chroma.TRANSITIONS].index(self.cfg[k])
+                                   if self.cfg[k] in [c for c, _ in chroma.TRANSITIONS] else 0))
+            cb.currentIndexChanged.connect(lambda _, k=k, cb=cb: self._trans(k, cb.currentData()))
+            sp = QDoubleSpinBox()
+            sp.setRange(0.05, 5.0)
+            sp.setSingleStep(0.05)
+            sp.setSuffix(" s")
+            sp.setValue(float(self.cfg[k + "_duree"]))
+            sp.valueChanged.connect(lambda v, k=k: self._trans_d(k, v))
+            form.addRow("Entrée" if k == "entree" else "Sortie", self._row(cb, sp))
 
         b_del = QPushButton("Retirer la superposition")
         b_del.clicked.connect(self._remove)
@@ -124,22 +151,27 @@ class OverlayDialog(QDialog):
         rl.addWidget(self.l_file)
         rl.addLayout(form)
         rl.addStretch(1)
-        top = QHBoxLayout()
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setWidget(right)
         left = QVBoxLayout()
         left.addWidget(self.view)
-        tip = QLabel("Astuce : passe en « Masque » et monte la tolérance jusqu'à ce que le fond soit tout noir, "
-                     "puis baisse le débordement si le sujet devient gris.")
+        tip = QLabel("Astuce : passe en « Masque » et monte la tolérance jusqu'à ce que le fond soit tout noir. "
+                     "Si un liseré reste autour du sujet, monte « Rétrécir les bords » de 1 ou 2. "
+                     "Bouge « Aperçu à » au début / à la fin pour voir l'entrée et la sortie.")
         tip.setWordWrap(True)
         tip.setMaximumWidth(PW)
         left.addWidget(tip)
         left.addStretch(1)
+        top = QHBoxLayout()
         top.addLayout(left)
-        top.addWidget(right, 1)
+        top.addWidget(scroll, 1)
         lay = QVBoxLayout(self)
         lay.addLayout(top)
         lay.addLayout(bot)
 
         self._swatch()
+        self._cont(self.c_cont.isChecked())
         img = chroma.read_frame(vclip.source(clip), (vclip.offset(clip) or 0) + t_clip, PW, PH,
                                 f"scale={PW}:{PH}:force_original_aspect_ratio=decrease,"
                                 f"pad={PW}:{PH}:(ow-iw)/2:(oh-ih)/2,format=rgb24") if clip else None
@@ -149,7 +181,31 @@ class OverlayDialog(QDialog):
         else:
             self._redraw()
 
-    # ------------------------------------------------------------ fichier
+    # ------------------------------------------------------------ petits widgets
+    @staticmethod
+    def _title(t):
+        lab = QLabel(t)
+        lab.setStyleSheet("font-weight: 700; margin-top: 8px;")
+        return lab
+
+    @staticmethod
+    def _row(*ws):
+        w = QWidget()
+        h = QHBoxLayout(w)
+        h.setContentsMargins(0, 0, 0, 0)
+        for x in ws:
+            h.addWidget(x)
+        return w
+
+    def _time_slider(self, key):
+        s = QSlider(Qt.Orientation.Horizontal)
+        s.setRange(0, 0)
+        lab = QLabel("0.00 s")
+        lab.setFixedWidth(60)
+        s.valueChanged.connect(lambda v, k=key: self._time_moved(k, v))
+        return s, lab
+
+    # ------------------------------------------------------------ fichier / passage
     def _choose(self):
         f, _ = QFileDialog.getOpenFileName(self, "Vidéo à superposer", "",
                                            "Vidéos (*.mp4 *.mov *.mkv *.webm *.avi);;Tous les fichiers (*)")
@@ -157,32 +213,60 @@ class OverlayDialog(QDialog):
             self._file_set(f)
 
     def _file_set(self, f, keep=False):
-        from app.core import render
+        from app.core import render, timeremap
         self.cfg["fichier"] = f
-        d = render.duration(f)
-        self.l_file.setText(f"{Path(f).name}  ({d:.2f} s)")
-        self.s_start.blockSignals(True)
-        self.s_start.setRange(0, max(0, int(d * 100) - 1))
-        self.s_start.setValue(int(float(self.cfg["debut"]) * 100) if keep else 0)
-        self.s_start.blockSignals(False)
+        self.length = d = render.duration(f)
+        fps = timeremap.source_fps(f) or 0
+        self.l_file.setText(f"{Path(f).name}  ({d:.2f} s, {fps:.0f} i/s)")
+        n = max(1, int(d * 100))
+        a = int(float(self.cfg["debut"]) * 100) if keep else 0
+        b = int(float(self.cfg["fin"]) * 100) if keep and self.cfg["fin"] else n
+        for s, v in ((self.s_a, a), (self.s_b, b), (self.s_p, a)):
+            s.blockSignals(True)
+            s.setRange(0, n)
+            s.setValue(min(n, v))
+            s.blockSignals(False)
         if not keep:
-            self.cfg["debut"] = 0.0
-        self.l_start.setText(f"{self.s_start.value() / 100:.2f} s")
+            self.cfg["debut"], self.cfg["fin"] = 0.0, None
+        self._labels()
         self._load_fg()
         if not keep and self.fg_raw is not None:
             self._auto()
 
-    def _start_moved(self, v):
-        self.cfg["debut"] = v / 100
-        self.l_start.setText(f"{v / 100:.2f} s")
-        self.ftimer.start(120)
+    def _time_moved(self, k, v):
+        if k == "debut":
+            if v >= self.s_b.value():
+                self.s_b.setValue(min(self.s_b.maximum(), v + 1))
+            self.cfg["debut"] = v / 100
+            self.s_p.setValue(v)
+        else:
+            if v <= self.s_a.value():
+                self.s_a.setValue(max(0, v - 1))
+            self.cfg["fin"] = None if v >= self.s_b.maximum() else v / 100
+            self.s_p.setValue(max(self.s_a.value(), v - 1))
+        self._labels()
+        self.ftimer.start(90)
+
+    def _labels(self):
+        self.l_a.setText(f"{self.s_a.value() / 100:.2f} s")
+        self.l_b.setText(f"{self.s_b.value() / 100:.2f} s")
+        self.l_p.setText(f"{self.s_p.value() / 100:.2f} s")
+
+    def _cont(self, v):
+        self.cfg["continuer"] = v
+        self.c_loop.setEnabled(not v)
+
+    def _span(self):
+        return max(0.05, self.s_b.value() / 100 - self.s_a.value() / 100)
 
     def _load_fg(self):
+        self._labels()
         if not self.cfg["fichier"]:
             return
         w, h, _, _ = chroma.layout(self.cfg, PW, PH)
-        self.fg_raw = chroma.read_frame(self.cfg["fichier"], float(self.cfg["debut"]), w, h,
+        self.fg_raw = chroma.read_frame(self.cfg["fichier"], self.s_p.value() / 100, w, h,
                                         chroma.fit_filter(self.cfg, w, h))
+        self.noise = chroma._noise(h, w) if self.fg_raw is not None else None
         self._redraw()
 
     # ------------------------------------------------------------ couleur
@@ -199,7 +283,7 @@ class OverlayDialog(QDialog):
         self.cfg["couleur"] = hexa
         self._swatch()
         if self.cfg["fichier"]:
-            self._load_fg()               # les bandes autour prennent la nouvelle couleur
+            self._load_fg()
 
     def _auto(self):
         if self.fg_raw is not None:
@@ -228,19 +312,25 @@ class OverlayDialog(QDialog):
     def _set(self, k, v, lab):
         self.cfg[k] = v
         lab.setText(str(v))
-        if k in ("taille", "x", "y"):
-            self.ftimer.start(120) if k == "taille" else self.timer.start(30)
-        else:
-            self.timer.start(30)
+        (self.ftimer if k == "taille" else self.timer).start(60 if k == "taille" else 30)
+
+    def _trans(self, k, code):
+        self.cfg[k] = code
+        self.timer.start(30)
+
+    def _trans_d(self, k, v):
+        self.cfg[k + "_duree"] = v
+        self.timer.start(30)
 
     def _redraw(self):
         out = self.bg
         if self.fg_raw is not None:
             _, _, x, y = chroma.layout(self.cfg, PW, PH)
+            t = self.s_p.value() / 100 - self.s_a.value() / 100
+            mult, glow = chroma.visibility(self.cfg, t, self._span(), self.fg_raw, self.noise)
             out = chroma.composite(self.bg, self.fg_raw, self.cfg, x, y, scale=PW / 1920,
-                                   view=VIEWS[self.mode.currentIndex()][1])
+                                   view=VIEWS[self.mode.currentIndex()][1], mult=mult, glow=glow)
         out = np.ascontiguousarray(out)
-        self.shown = out
         img = QImage(out.data, PW, PH, PW * 3, QImage.Format.Format_RGB888)
         self.view.setPixmap(QPixmap.fromImage(img.copy()))
 

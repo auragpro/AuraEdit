@@ -1,3 +1,16 @@
+## Nouveautés de la version 0.9.0
+
+- **Edit auto : reconnaissance des plans bien meilleure.**
+  - L'app trouve d'abord le TYPE de plan (flick au couteau, kunai, dash, dash back, dismiss) d'après la forme de ce que le joueur a en main, puis seulement ensuite quel couteau d'après les couleurs du skin.
+  - Un flick reçoit un flick (jamais un kunai ni un dash), un kunai reste un kunai, un dash garde son côté.
+  - Les couteaux sont appris sur les images où le couteau est sorti, plus sur l'arme d'avant le kill.
+- **Fond vert bien plus propre et plus complet.**
+  - Bords nettoyés : plus de liseré vert ou sombre autour du sujet.
+  - **Choisis le passage** de la vidéo : Début, Fin et un curseur « Aperçu à » pour voir n'importe quel moment.
+  - **Fluide en 60 i/s** : une vidéo en 30 i/s est interpolée en 60 i/s.
+  - **Continuité** : la vidéo commence sur le clip choisi et continue sur les clips suivants jusqu'à la fin du passage.
+  - **Entrée / sortie** : Fondu ou **Dissolve Luma** (désintégration selon la luminosité, façon S_DissolveLuma), avec la durée au choix.
+
 ## Nouveautés de la version 0.8.9
 
 - **Correction : « Edit auto » et la superposition fond vert marchent** (erreur « No module named 'cv2' » réglée).

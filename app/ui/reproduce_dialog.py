@@ -53,9 +53,7 @@ class AutoThread(QThread):
     def run(self):
         try:
             from app.core import auto_match
-            from app.core.render import duration
-            durs = {c: duration(c) for k in self.classes.values() for c in k["clips"][:5]}
-            res = auto_match.analyse(self.edit, self.bounds, self.classes, tr.clip_remaps(), durs,
+            res = auto_match.analyse(self.edit, self.bounds, self.classes, tr.clip_remaps(),
                                      lambda f, t: self.step.emit(f, t))
             self.done.emit(res)
         except Exception as e:                          # noqa: BLE001

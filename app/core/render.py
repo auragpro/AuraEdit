@@ -58,22 +58,32 @@ def segments(project):
     return [(k, p) for k, p in segs if p and vclip.exists(p)]
 
 
-def _overlay(project, kind, path, part, tmp, i, steps, n, progress, is_cancelled):
-    """Si une vidéo est superposée sur ce clip (fond vert), on l'incruste dans le morceau préparé."""
-    ov = (getattr(project, "overlays", None) or {}).get(path) if kind == "clip" else None
-    if not ov or not ov.get("fichier") or not Path(ov["fichier"]).is_file():
-        return part
+def _overlays(project, info, video, is_list, tmp, ff, total, progress, is_cancelled):
+    """Vidéos superposées (fond vert) : posées sur toute la vidéo, à partir du début de leur clip,
+    et elles peuvent continuer sur les clips suivants."""
+    ovs = getattr(project, "overlays", None) or {}
+    items = []
+    for s in info:
+        ov = ovs.get(s["fichier"]) if s["type"] == "clip" else None
+        if ov and ov.get("fichier") and Path(ov["fichier"]).is_file():
+            items.append({**ov, "t0": s["debut"], "clip_duree": s["duree"]})
+    if not items:
+        return video, is_list
     from . import chroma
-    out = tmp / f"{i:04d}_ov.mp4"
+    src = video
+    if is_list:
+        src = tmp / "base_ov.mp4"
+        _run([ff, "-y", "-hide_banner", "-f", "concat", "-safe", "0", "-i", str(video), "-c:v", "copy", str(src)],
+             is_cancelled)
+    out = tmp / "superpose.mp4"
     try:
-        chroma.apply(part, out, ov, W, H, FPS, is_cancelled,
-                     (lambda f: progress((i + f) / steps, f"Clip {i + 1}/{n} — superposition fond vert"))
-                     if progress else None, int(duration(part) * FPS))
+        chroma.apply_timeline(src, out, items, W, H, FPS, total, is_cancelled,
+                              (lambda f: progress(f, "Superposition fond vert...")) if progress else None)
     except InterruptedError:
         raise Cancelled()
-    except (RuntimeError, OSError) as e:
-        raise RenderError(f"Superposition impossible sur {vclip.name(path)} :\n{e}")
-    return out
+    except (RuntimeError, OSError, ValueError) as e:
+        raise RenderError(f"Superposition impossible :\n{e}")
+    return out, False
 
 
 def render(project, output, progress=None, is_cancelled=None, export=None):
@@ -106,7 +116,6 @@ def render(project, output, progress=None, is_cancelled=None, export=None):
                     raise Cancelled()
                 except (ValueError, KeyError, OSError) as e:
                     raise RenderError(f"Time remap impossible pour {vclip.name(path)} :\n{e}")
-                part = _overlay(project, kind, path, part, tmp, i, steps, len(segs), progress, is_cancelled)
                 d = duration(part)
                 info.append({"type": kind, "fichier": str(path), "debut": round(t, 3), "duree": round(d, 3),
                              "time_remap": True})
@@ -115,7 +124,6 @@ def render(project, output, progress=None, is_cancelled=None, export=None):
                 continue
             _run([ff, "-y", "-hide_banner", *vclip.input_args(path), "-an", "-vf", vf, "-c:v", "libx264",
                   "-preset", "veryfast", "-crf", "10", str(part)], is_cancelled)
-            part = _overlay(project, kind, path, part, tmp, i, steps, len(segs), progress, is_cancelled)
             d = duration(part)
             info.append({"type": kind, "fichier": str(path), "debut": round(t, 3), "duree": round(d, 3)})
             parts.append(part)
@@ -140,7 +148,10 @@ def render(project, output, progress=None, is_cancelled=None, export=None):
                 raise Cancelled()
             except (RuntimeError, OSError) as e:
                 raise RenderError(f"Shakes impossibles :\n{e}")
-        if video == lst:
+        video, is_list = _overlays(project, info, video, video == lst, tmp, ff, int(t * FPS) + 1,
+                                   (lambda f, txt: progress(min(0.98, (len(segs) + 0.5 + f * 0.4) / steps), txt))
+                                   if progress else None, is_cancelled)
+        if is_list:
             cmd = [ff, "-y", "-hide_banner", "-f", "concat", "-safe", "0", "-i", str(lst)]
         else:
             cmd = [ff, "-y", "-hide_banner", "-i", str(video)]

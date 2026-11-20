@@ -1,11 +1,16 @@
-"""Incrustation d'une vidéo par-dessus un clip, avec suppression du fond (fond vert ou n'importe quelle couleur).
+"""Incrustation d'une vidéo par-dessus l'edit, avec suppression du fond (fond vert ou n'importe quelle couleur).
 
 Inspiré de Keylight + Advanced Spill Suppressor d'After Effects :
 - le masque se calcule par « différence de couleur » : on mesure à quel point chaque pixel va dans la
-  direction de la couleur du fond (et pas seulement s'il lui ressemble), donc les ombres et les plis
-  du fond partent aussi, et les couleurs proches (jaune, peau...) restent ;
-- douceur, rétrécissement et adoucissement des bords pour un contour propre ;
+  direction de la couleur du fond, donc les ombres et les plis du fond partent aussi, et les couleurs
+  proches (jaune, peau...) restent ;
+- bords propres : on « dé-mélange » la couleur du fond des pixels de bord (plus de liseré vert/noir),
+  puis rétrécir / adoucir le masque ;
 - suppression du débordement : on retire la teinte du fond qui bave sur le sujet, en gardant la luminosité.
+
+La vidéo incrustée commence sur un clip et peut continuer sur les clips suivants. Elle peut apparaître
+et disparaître en fondu ou en « Dissolve Luma » (désintégration selon la luminosité, façon S_DissolveLuma).
+Si elle est en 30 i/s, elle est fluidifiée en 60 i/s par interpolation de mouvement.
 """
 import subprocess
 
@@ -14,7 +19,10 @@ import numpy as np
 from . import audio
 
 DEFAULT = {"fichier": None, "couleur": "#00ff00", "tolerance": 50, "douceur": 30, "retrecir": 1,
-           "adoucir": 1, "spill": 80, "taille": 100, "x": 0, "y": 0, "debut": 0.0, "boucle": False}
+           "adoucir": 1, "spill": 80, "taille": 100, "x": 0, "y": 0, "debut": 0.0, "fin": None,
+           "boucle": False, "continuer": True, "fluide": True,
+           "entree": "aucune", "entree_duree": 0.3, "sortie": "aucune", "sortie_duree": 0.3}
+TRANSITIONS = [("aucune", "Aucune"), ("fondu", "Fondu"), ("dissolve", "Dissolve Luma (désintégration)")]
 LUMA = np.array([0.2126, 0.7152, 0.0722], np.float32)
 
 
@@ -34,8 +42,8 @@ def rgb_hex(c):
     return "#" + "".join(f"{int(max(0, min(255, round(v)))):02x}" for v in c)
 
 
+# ------------------------------------------------------------------ outils masque (sans OpenCV)
 def _erode(a, r):
-    """Rétrécit le masque de r pixels (minimum glissant, sans OpenCV)."""
     for ax in (0, 1):
         p = np.pad(a, [(r, r) if i == ax else (0, 0) for i in (0, 1)], mode="edge")
         n = a.shape[ax]
@@ -56,13 +64,13 @@ def _box(a, r):
 
 
 def _blur(a, sigma):
-    """Flou ~gaussien (3 flous boîte), sans OpenCV."""
     r = max(1, int(round(sigma * 0.9)))
     for _ in range(3):
         a = _box(a, r)
     return a.astype(np.float32)
 
 
+# ------------------------------------------------------------------ détourage
 def _match(P, C):
     """1 = exactement la couleur du fond, <= 0 = rien à voir."""
     kv = C - C.mean()
@@ -72,7 +80,6 @@ def _match(P, C):
     dev = P - P.mean(axis=2, keepdims=True)
     s = (dev @ kv) / n2
     res = np.linalg.norm(dev - s[..., None] * kv, axis=2) / np.sqrt(n2)
-    # la luminosité compte un peu (un fond vert foncé reste du fond, mais pas un objet noir)
     return s - res, s, kv
 
 
@@ -85,6 +92,11 @@ def key(img, cfg, scale=1.0):
     hi = 1 - float(cfg["tolerance"]) * 0.008
     lo = hi - max(0.02, float(cfg["douceur"]) * 0.008)
     a = np.clip((hi - m) / (hi - lo), 0, 1).astype(np.float32)
+    # bords : on enlève la part de couleur du fond mélangée dans les pixels semi-transparents
+    edge = (a > 0.02) & (a < 0.98)
+    if edge.any():
+        ae = a[edge][:, None]
+        P[edge] = np.clip((P[edge] - (1 - ae) * C) / ae, 0, 1)
     r = int(round(float(cfg["retrecir"]) * scale))
     if r > 0:
         a = _erode(a, r)
@@ -93,17 +105,12 @@ def key(img, cfg, scale=1.0):
         a = _blur(a, b)
     amt = float(cfg["spill"]) / 100
     if amt > 0 and kv is not None:
+        dev = P - P.mean(axis=2, keepdims=True)
+        s2 = np.clip((dev @ kv) / float((kv ** 2).sum()), 0, None)
         y0 = P @ LUMA
-        P = P - (amt * np.clip(s, 0, None))[..., None] * kv
-        P = P + (y0 - P @ LUMA)[..., None]            # garde la luminosité
-        P = np.clip(P, 0, 1)
+        P = P - (amt * s2)[..., None] * kv
+        P = np.clip(P + (y0 - P @ LUMA)[..., None], 0, 1)            # garde la luminosité
     return P, a
-
-
-def matte_frame(img, cfg, scale=1.0):
-    """Vue « masque » noir/blanc, comme l'affichage Screen Matte de Keylight."""
-    _, a = key(img, cfg, scale)
-    return np.repeat((a * 255).astype(np.uint8)[..., None], 3, axis=2)
 
 
 def layout(cfg, W, H):
@@ -116,14 +123,48 @@ def layout(cfg, W, H):
     return w, h, x, y
 
 
-def fit_filter(cfg, w, h):
-    """Filtre ffmpeg qui met la vidéo dans w x h ; les bandes ajoutées ont la couleur du fond (donc enlevées)."""
+def fit_filter(cfg, w, h, motion=None):
+    """Met la vidéo dans w x h (bandes de la couleur du fond, donc enlevées). motion : filtre de cadence."""
     col = cfg_full(cfg)["couleur"].lstrip("#")
-    return (f"scale={w}:{h}:force_original_aspect_ratio=decrease,"
-            f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:color=0x{col},setsar=1,format=rgb24")
+    f = (f"scale={w}:{h}:force_original_aspect_ratio=decrease:flags=bicubic,"
+         f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:color=0x{col},setsar=1")
+    return f + (f",{motion}" if motion else "") + ",format=rgb24"
 
 
-def composite(bg, fg, cfg, x, y, scale=1.0, view="resultat"):
+# ------------------------------------------------------------------ transitions
+def _noise(h, w, seed=7):
+    rng = np.random.default_rng(seed)
+    n = rng.random((max(2, h // 12 + 2), max(2, w // 12 + 2))).astype(np.float32)
+    n = np.repeat(np.repeat(n, 12, axis=0), 12, axis=1)[:h, :w]
+    return _blur(n, 6)
+
+
+def visibility(cfg, t, span, fg=None, noise=None):
+    """Multiplicateur d'opacité à l'instant t (s) dans la vidéo incrustée qui dure span s.
+    Renvoie (scalaire ou tableau HxW, bord lumineux ou None)."""
+    cfg = cfg_full(cfg)
+    phases = []
+    di, do = float(cfg["entree_duree"]), float(cfg["sortie_duree"])
+    if cfg["entree"] != "aucune" and di > 0 and t < di:
+        phases.append((cfg["entree"], max(0.0, t / di)))
+    if cfg["sortie"] != "aucune" and do > 0 and t > span - do:
+        phases.append((cfg["sortie"], max(0.0, (span - t) / do)))
+    mult, glow = 1.0, None
+    for kind, p in phases:
+        p = min(1.0, p)
+        if kind == "fondu":
+            mult = mult * p
+        elif kind == "dissolve" and fg is not None:
+            d = 0.6 * (fg.astype(np.float32) / 255 @ LUMA) + 0.4 * (noise if noise is not None else 0.5)
+            soft = 0.12
+            m = np.clip((p * (1 + soft) - (1 - d)) / soft, 0, 1)        # les zones claires partent en dernier
+            g = np.clip(1 - np.abs(m * 2 - 1), 0, 1) * (m < 1)
+            mult = mult * m
+            glow = g if glow is None else np.maximum(glow, g)
+    return mult, glow
+
+
+def composite(bg, fg, cfg, x, y, scale=1.0, view="resultat", mult=1.0, glow=None):
     """Pose fg (détouré) sur bg (uint8 RGB) à la position x, y. Renvoie un uint8 RGB."""
     H, W = bg.shape[:2]
     h, w = fg.shape[:2]
@@ -131,11 +172,15 @@ def composite(bg, fg, cfg, x, y, scale=1.0, view="resultat"):
     out = bg.copy()
     if x1 <= x0 or y1 <= y0:
         return out
+    cut = (slice(y0 - y, y1 - y), slice(x0 - x, x1 - x))
     if view == "brut":
-        out[y0:y1, x0:x1] = fg[y0 - y:y1 - y, x0 - x:x1 - x]
+        out[y0:y1, x0:x1] = fg[cut]
         return out
     rgb, a = key(fg, cfg, scale)
-    rgb, a = rgb[y0 - y:y1 - y, x0 - x:x1 - x], a[y0 - y:y1 - y, x0 - x:x1 - x, None]
+    a = a * mult if np.isscalar(mult) else a * mult
+    if glow is not None:
+        rgb = np.clip(rgb + (glow * 0.9)[..., None] * (a > 0.01)[..., None], 0, 1)
+    rgb, a = rgb[cut], a[cut][..., None]
     if view == "masque":
         out[:] = 0
         out[y0:y1, x0:x1] = np.repeat((a * 255).astype(np.uint8), 3, axis=2)
@@ -161,54 +206,99 @@ def border_color(img):
     return rgb_hex(np.median(e, axis=0))
 
 
-def apply(part, out, cfg, W, H, FPS, is_cancelled=None, progress=None, total=0):
-    """Incruste la vidéo de cfg["fichier"] sur le clip déjà préparé `part` (W x H, FPS) -> `out`."""
-    cfg = cfg_full(cfg)
+# ------------------------------------------------------------------ rendu sur toute la vidéo
+class _Layer:
+    def __init__(self, item, W, H, FPS):
+        from . import render, timeremap
+        self.cfg = cfg_full(item)
+        f = self.cfg["fichier"]
+        total = render.duration(f)
+        a = float(self.cfg["debut"])
+        b = float(self.cfg["fin"]) if self.cfg["fin"] else total
+        b = min(b, total) if total else b
+        part = max(0.05, b - a)
+        if self.cfg["continuer"]:
+            self.span = part
+        else:
+            self.span = float(item["clip_duree"]) if self.cfg["boucle"] else min(part, float(item["clip_duree"]))
+        self.f0 = int(round(float(item["t0"]) * FPS))
+        self.n = max(1, int(round(self.span * FPS)))
+        self.FPS = FPS
+        self.w, self.h, self.x, self.y = layout(self.cfg, W, H)
+        src = timeremap.source_fps(f) or FPS
+        motion = (f"minterpolate=fps={FPS}:mi_mode=mci:mc_mode=aobmc:me_mode=bidir:vsbmc=1"
+                  if self.cfg["fluide"] and src < FPS - 1 else f"fps={FPS}")
+        loop = ["-stream_loop", "-1"] if self.cfg["boucle"] and not self.cfg["continuer"] else []
+        dur = [] if loop else ["-t", f"{part:.3f}"]
+        self.cmd = [audio.ffmpeg_exe(), "-hide_banner", "-loglevel", "error", *loop, "-ss", f"{a:.3f}", *dur,
+                    "-i", str(f), "-an", "-vf", fit_filter(self.cfg, self.w, self.h, motion),
+                    "-f", "rawvideo", "-pix_fmt", "rgb24", "-"]
+        self.proc, self.k, self.done = None, 0, False
+        self.noise = _noise(self.h, self.w) if "dissolve" in (self.cfg["entree"], self.cfg["sortie"]) else None
+
+    def frame(self, fi, img):
+        if self.done or fi < self.f0:
+            return img
+        if self.k >= self.n:
+            self.close()
+            return img
+        if self.proc is None:
+            self.proc = subprocess.Popen(self.cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                                         creationflags=audio._NO_WINDOW)
+        raw = self.proc.stdout.read(self.w * self.h * 3)
+        if len(raw) < self.w * self.h * 3:
+            self.close()
+            return img
+        fg = np.frombuffer(raw, np.uint8).reshape(self.h, self.w, 3)
+        mult, glow = visibility(self.cfg, self.k / self.FPS, self.span, fg, self.noise)
+        self.k += 1
+        return composite(img, fg, self.cfg, self.x, self.y, mult=mult, glow=glow)
+
+    def close(self):
+        self.done = True
+        if self.proc is not None:
+            self.proc.kill()
+            self.proc.wait()
+            self.proc = None
+
+
+def apply_timeline(src, out, items, W, H, FPS, total=0, is_cancelled=None, progress=None):
+    """Incruste toutes les vidéos `items` ({réglages..., "t0", "clip_duree"}) sur la vidéo src -> out."""
     ff = audio.ffmpeg_exe()
-    w, h, x, y = layout(cfg, W, H)
     nw = audio._NO_WINDOW
-    bg = subprocess.Popen([ff, "-hide_banner", "-loglevel", "error", "-i", str(part), "-f", "rawvideo",
+    layers = [_Layer(it, W, H, FPS) for it in items]
+    bg = subprocess.Popen([ff, "-hide_banner", "-loglevel", "error", "-i", str(src), "-f", "rawvideo",
                            "-pix_fmt", "rgb24", "-"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                           creationflags=nw)
-    loop = ["-stream_loop", "-1"] if cfg["boucle"] else []
-    fg = subprocess.Popen([ff, "-hide_banner", "-loglevel", "error", *loop, "-ss", f"{float(cfg['debut']):.3f}",
-                           "-i", str(cfg["fichier"]), "-an", "-vf", f"fps={FPS}," + fit_filter(cfg, w, h),
-                           "-f", "rawvideo", "-pix_fmt", "rgb24", "-"], stdout=subprocess.PIPE,
-                          stderr=subprocess.DEVNULL, creationflags=nw)
     enc = subprocess.Popen([ff, "-y", "-hide_banner", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "rgb24",
                             "-s", f"{W}x{H}", "-r", str(FPS), "-i", "-", "-c:v", "libx264", "-preset", "veryfast",
                             "-crf", "10", "-pix_fmt", "yuv420p", str(out)], stdin=subprocess.PIPE,
                            stderr=subprocess.PIPE, creationflags=nw)
-    nb, nf = W * H * 3, w * h * 3
-    fg_on, i = True, 0
+    nb, i = W * H * 3, 0
     try:
         while True:
             raw = bg.stdout.read(nb)
             if len(raw) < nb:
                 break
             frame = np.frombuffer(raw, np.uint8).reshape(H, W, 3)
-            if fg_on:
-                rf = fg.stdout.read(nf)
-                if len(rf) < nf:
-                    fg_on = False
-                else:
-                    frame = composite(frame, np.frombuffer(rf, np.uint8).reshape(h, w, 3), cfg, x, y)
-            enc.stdin.write(frame.tobytes())
+            for L in layers:
+                frame = L.frame(i, frame)
+            enc.stdin.write(np.ascontiguousarray(frame).tobytes())
             i += 1
             if is_cancelled and is_cancelled():
                 raise InterruptedError()
             if progress and total and i % 15 == 0:
                 progress(min(1.0, i / total))
     finally:
-        for p in (bg, fg):
-            p.kill()
+        for L in layers:
+            L.close()
+        bg.kill()
         try:
             enc.stdin.close()
         except OSError:
             pass
         err = enc.stderr.read()
         enc.wait()
-        for p in (bg, fg):
-            p.wait()
+        bg.wait()
     if enc.returncode != 0:
         raise RuntimeError(err.decode("utf-8", "replace")[-600:])
