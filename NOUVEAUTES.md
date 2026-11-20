@@ -1,3 +1,7 @@
+## Nouveautés de la version 0.8.9
+
+- **Correction : « Edit auto » et la superposition fond vert marchent** (erreur « No module named 'cv2' » réglée).
+
 ## Nouveautés de la version 0.8.8
 
 - **🤖 Edit auto dans « Reproduire un edit »** : un bouton remplit tous les plans d'un coup.

@@ -7,7 +7,6 @@ moitié droite séparément : un dash main gauche et un dash main droite ne se r
 import subprocess
 from concurrent.futures import ThreadPoolExecutor
 
-import cv2
 import numpy as np
 
 from . import audio, vclip
@@ -27,21 +26,34 @@ def _grab(path, t):
 
 
 def _image(file):
-    img = cv2.imread(str(file))
-    if img is None:
+    p = subprocess.run([audio.ffmpeg_exe(), "-hide_banner", "-loglevel", "error", "-i", str(file),
+                        "-frames:v", "1", "-vf", f"scale={SW}:{SH},format=rgb24", "-f", "rawvideo", "-"],
+                       capture_output=True, creationflags=audio._NO_WINDOW)
+    if len(p.stdout) < SW * SH * 3:
         return None
-    return cv2.resize(cv2.cvtColor(img, cv2.COLOR_BGR2RGB), (SW, SH), interpolation=cv2.INTER_AREA)
+    return np.frombuffer(p.stdout[:SW * SH * 3], np.uint8).reshape(SH, SW, 3)
+
+
+def _hue_sat(img):
+    f = img.astype(np.float32) / 255
+    r, g, b = f[..., 0], f[..., 1], f[..., 2]
+    mx, mn = f.max(axis=2), f.min(axis=2)
+    d = mx - mn + 1e-6
+    h = np.where(mx == r, (g - b) / d % 6, np.where(mx == g, (b - r) / d + 2, (r - g) / d + 4)) * 30
+    s = np.where(mx > 0, (mx - mn) / (mx + 1e-6), 0)
+    return h, s
 
 
 def desc(img):
-    hsv = cv2.cvtColor(img, cv2.COLOR_RGB2HSV)
+    hue, sat = _hue_sat(img)
     hists = []
     for x0, x1 in ((0, SW // 2), (SW // 2, SW)):
-        h = cv2.calcHist([np.ascontiguousarray(hsv[SH // 2:, x0:x1])], [0, 1], None, [18, 4],
-                         [0, 180, 0, 256]).ravel()
+        h, _, _ = np.histogram2d(hue[SH // 2:, x0:x1].ravel(), sat[SH // 2:, x0:x1].ravel(), bins=[18, 4],
+                                 range=[[0, 180], [0, 1.0001]])
+        h = h.ravel().astype(np.float32)
         hists.append(h / (h.sum() + 1e-6))
-    g = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)[SH // 2:]
-    g = cv2.resize(g, (32, 9), interpolation=cv2.INTER_AREA).astype(np.float32).ravel()
+    g = (img.astype(np.float32) @ np.array([0.299, 0.587, 0.114], np.float32))[SH // 2:]
+    g = g.reshape(9, 5, 32, 5).mean(axis=(1, 3)).ravel()
     g = (g - g.mean()) / (g.std() + 1e-6)
     return np.concatenate(hists), g
 

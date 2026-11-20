@@ -1,6 +1,6 @@
 """Identité de l'application. Change __version__ avant chaque nouvelle release."""
 
-__version__ = "0.8.8"
+__version__ = "0.8.9"
 APP_NAME = "AuraEdit"
 GITHUB_REPO = "auragpro/AuraEdit"     # dépôt GitHub où sont publiées les mises à jour
 ASSET_NAME = "AuraEdit.exe"           # nom du fichier attaché à chaque Release

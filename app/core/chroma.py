@@ -9,7 +9,6 @@ Inspiré de Keylight + Advanced Spill Suppressor d'After Effects :
 """
 import subprocess
 
-import cv2
 import numpy as np
 
 from . import audio
@@ -33,6 +32,35 @@ def hex_rgb(h):
 
 def rgb_hex(c):
     return "#" + "".join(f"{int(max(0, min(255, round(v)))):02x}" for v in c)
+
+
+def _erode(a, r):
+    """Rétrécit le masque de r pixels (minimum glissant, sans OpenCV)."""
+    for ax in (0, 1):
+        p = np.pad(a, [(r, r) if i == ax else (0, 0) for i in (0, 1)], mode="edge")
+        n = a.shape[ax]
+        out = p.take(range(0, n), axis=ax)
+        for k in range(1, 2 * r + 1):
+            out = np.minimum(out, p.take(range(k, k + n), axis=ax))
+        a = out
+    return a
+
+
+def _box(a, r):
+    for ax in (0, 1):
+        p = np.pad(a, [(r + 1, r) if i == ax else (0, 0) for i in (0, 1)], mode="edge")
+        c = np.cumsum(p, axis=ax, dtype=np.float32)
+        n = a.shape[ax]
+        a = (c.take(range(2 * r + 1, 2 * r + 1 + n), axis=ax) - c.take(range(0, n), axis=ax)) / (2 * r + 1)
+    return a
+
+
+def _blur(a, sigma):
+    """Flou ~gaussien (3 flous boîte), sans OpenCV."""
+    r = max(1, int(round(sigma * 0.9)))
+    for _ in range(3):
+        a = _box(a, r)
+    return a.astype(np.float32)
 
 
 def _match(P, C):
@@ -59,10 +87,10 @@ def key(img, cfg, scale=1.0):
     a = np.clip((hi - m) / (hi - lo), 0, 1).astype(np.float32)
     r = int(round(float(cfg["retrecir"]) * scale))
     if r > 0:
-        a = cv2.erode(a, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * r + 1, 2 * r + 1)))
+        a = _erode(a, r)
     b = float(cfg["adoucir"]) * scale
     if b > 0.3:
-        a = cv2.GaussianBlur(a, (0, 0), b)
+        a = _blur(a, b)
     amt = float(cfg["spill"]) / 100
     if amt > 0 and kv is not None:
         y0 = P @ LUMA
