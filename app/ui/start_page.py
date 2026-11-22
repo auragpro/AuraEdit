@@ -13,7 +13,7 @@ from version import __version__
 from .style import RED, asset
 
 WHATS_NEW = [
-    "Interface plus propre (barres, cases, menus...)",
+    "Nouveau look moderne avec effets de lumière",
     "Reproduire : timeline des clips, clic = aller au plan",
     "Reproduire : la musique de l'edit est gardée"]
 

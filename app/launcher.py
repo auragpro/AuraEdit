@@ -51,6 +51,11 @@ def main():
     app.setApplicationName(APP_NAME)
     app.setApplicationVersion(__version__)
     app.setStyleSheet(STYLESHEET)
+    try:
+        from app.ui.style import install_glow
+        install_glow(app)                # halos lumineux sur les boutons
+    except Exception:
+        pass
     install_error_handler()
 
     window = MainWindow()

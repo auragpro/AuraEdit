@@ -1,3 +1,7 @@
+## Nouveautés de la version 1.0.3
+
+- **Nouveau look moderne avec effets de lumière, dans toute l'app** : dégradés et reflets sur les boutons, panneaux et listes, halo rouge lumineux autour des boutons principaux (plus fort au survol) et sur chaque bouton survolé, menu de gauche avec lueur rouge sur la page active, titre en dégradé, curseurs et barres de progression lumineux.
+
 ## Nouveautés de la version 1.0.2
 
 - **Interface plus propre** : barres de défilement fines, cases à cocher et boutons radio rouges, champs qui s'allument en rouge quand tu écris dedans, menus et listes déroulantes arrondis, info-bulles, onglets, cases numériques (frames, durées) et boutons qui réagissent au clic.
