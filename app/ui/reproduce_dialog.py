@@ -541,11 +541,12 @@ class ReproduceDialog(QDialog):
         from .timeremap_dialog import TimeRemapDialog
         cat, path = ch
         mode = {"Kunai": "kunai", "Dash back": "dashback", "Dismiss": "dismiss"}.get(cat)
+        gap = self.bounds[self.seg + 1] - self.bounds[self.seg]      # du début de ce plan au clip suivant
         if mode:
-            dlg = TimeRemapDialog(self.project, path, None, (), self, mode=mode)
+            dlg = TimeRemapDialog(self.project, path, None, (), self, mode=mode, gap=gap)
         else:
             knives = [n for n in proj.load_clip_folders() if n not in proj.SPECIAL_FOLDERS]
-            dlg = TimeRemapDialog(self.project, path, None if cat == "Dash" else cat, knives, self)
+            dlg = TimeRemapDialog(self.project, path, None if cat == "Dash" else cat, knives, self, gap=gap)
         dlg.exec()
         self._show_pick()
 
@@ -657,9 +658,13 @@ class ReproduceDialog(QDialog):
         clips = [c[1] for c in self.choices if c]
         clips = list(dict.fromkeys(clips))
         saved = tr.clip_remaps()
+        plans = {}
+        for k, ch in enumerate(self.choices):
+            if ch and ch[1] not in plans and k + 1 < len(self.bounds):
+                plans[ch[1]] = round(self.bounds[k + 1] - self.bounds[k], 4)   # plan -> clip suivant
         for c in clips:
             if c in saved:
-                self.project.remaps[c] = saved[c]
+                self.project.remaps[c] = dict(saved[c], plan=plans.get(c))
         self.project.clips = clips
         self.project.overlays = {self.choices[k][1]: ov for k, ov in self.overlays.items()
                                  if k < len(self.choices) and self.choices[k]}

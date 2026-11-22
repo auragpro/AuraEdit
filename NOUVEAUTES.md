@@ -1,3 +1,7 @@
+## Nouveautés de la version 0.9.5
+
+- **Time remap : plus de champ « Durée du ralenti ».** Le ralenti dure jusqu'au clip suivant : un clip qui commence à la frame 25 s'arrête à la frame 37 (début du 2e clip), le 2e va de 37 à 44, etc. Le retour est compris dedans.
+
 ## Nouveautés de la version 0.9.4
 
 - **Reproduire : main gauche ou main droite pour Dash, Kunai, Dash back et Dismiss.** Chaque catégorie a maintenant deux cases : « ⬅ gauche » et « droite ➡ ». Tu cliques celle que tu veux et le clip vient de cette main. Le clip choisi affiche aussi sa main.

@@ -166,7 +166,7 @@ class FramePicker(QFrame):
 class TimeRemapDialog(QDialog):
     """Renvoie Accepted (time remap enregistré) ou Rejected (pas de time remap pour ce clip)."""
 
-    def __init__(self, project, path, knife=None, knives=(), parent=None, mode="clip"):
+    def __init__(self, project, path, knife=None, knives=(), parent=None, mode="clip", gap=None):
         super().__init__(parent)
         self.kind = mode if mode in tr.HAND_TYPES else None
         self.kunai = self.kind is not None          # kunai, dash back, dismiss : même fonctionnement
@@ -282,17 +282,16 @@ class TimeRemapDialog(QDialog):
         grid.addWidget(self.flow_state, 7, 1)
         grid.addWidget(QLabel("Courbe 2 (keyframe 2 → 3, reverse)"), 1, 0)
         grid.addWidget(self.c2, 1, 1)
-        grid.addWidget(QLabel("Durée du ralenti (1 → 2)"), 2, 0)
-        grid.addWidget(self.slow, 2, 1)
         from app.core import markers as mk
-        self.gap = mk.gap_for(project, path, self.kind)
-        self.c_mark = QCheckBox("Caler sur les marqueurs de la musique"
-                                + (f" (plan de {self.gap:.2f} s)" if self.gap else " (aucun marqueur pour ce clip)"))
-        self.c_mark.setEnabled(bool(self.gap))
-        self.c_mark.setChecked(bool(self.gap) and old.get("marqueur", True))
-        self.c_mark.toggled.connect(self._fit_marker)
+        self.gap = gap or mk.gap_for(project, path, self.kind) or old.get("plan")
+        self.slow.hide()                                   # durée = plan jusqu'au clip suivant
+        self.c_mark = QLabel(("Durée du ralenti : calée sur le clip suivant "
+                              f"(plan de {self.gap:.2f} s ≈ {int(round(self.gap * tr.FPS))} frames, moins le retour)")
+                             if self.gap else "Durée du ralenti : calée sur le clip suivant au rendu.")
+        self.c_mark.setWordWrap(True)
+        self.c_mark.setStyleSheet("color: #8fa3b8;")
         self.back.valueChanged.connect(lambda _: self._fit_marker())
-        grid.addWidget(self.c_mark, 5, 0, 1, 2)
+        grid.addWidget(self.c_mark, 2, 0, 1, 2)
         grid.addWidget(QLabel("Durée du retour (2 → 3)"), 3, 0)
         grid.addWidget(self.back, 3, 1)
         grid.addWidget(QLabel("Frame blending"), 4, 0)
@@ -509,9 +508,7 @@ class TimeRemapDialog(QDialog):
     # ---------------------------------------------------------- réglages
     def _fit_marker(self, *_):
         """Ralenti = durée du plan (marqueur -> marqueur suivant) moins le retour."""
-        on = self.c_mark.isChecked() and bool(self.gap)
-        self.slow.setEnabled(not on)
-        if on:
+        if self.gap:
             self.slow.setValue(max(0.1, self.gap - self.back.value() / tr.FPS))
 
     def _flow_check(self, *_):
@@ -589,7 +586,7 @@ class TimeRemapDialog(QDialog):
             tr.save_kunai(self._global_cfg(), self.kind)
             data = {"type": self.kind, "debut": round(start, 4), "fin": round(end, 4),
                     "ralenti": self.slow.value(), "retour": self.back.value(),
-                    "marqueur": self.c_mark.isChecked()}
+                    "marqueur": True, "plan": round(self.gap, 4) if self.gap else None}
             self.project.remaps[self.path] = data
             tr.save_clip_remap(self.path, data)
             self.accept()
@@ -604,7 +601,7 @@ class TimeRemapDialog(QDialog):
         tr.save(self._global_cfg())
         data = {"couteau": name, "debut": round(start, 4), "fin": round(end, 4),
                 "ralenti": self.slow.value(), "retour": self.back.value(),
-                "marqueur": self.c_mark.isChecked()}
+                "marqueur": True, "plan": round(self.gap, 4) if self.gap else None}
         self.project.remaps[self.path] = data
         tr.save_clip_remap(self.path, data)
         self.accept()

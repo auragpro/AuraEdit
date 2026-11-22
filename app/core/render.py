@@ -108,9 +108,9 @@ def render(project, output, progress=None, is_cancelled=None, export=None):
                 try:
                     name = vclip.name(path)
                     rcfg = timeremap.cfg_for(remap)
-                    if remap.get("marqueur", True):              # durée calée sur les marqueurs de la musique
+                    if True:                                     # durée = plan jusqu'au clip suivant
                         from . import markers as _mk
-                        gap = _mk.gap_for(project, path)
+                        gap = remap.get("plan") or _mk.gap_for(project, path)
                         if gap:
                             rcfg["duree_ralenti"] = max(0.1, gap - int(rcfg.get("frames_retour", 6)) / timeremap.FPS)
                     timeremap.render(path, float(remap["debut"]), float(remap["fin"]), rcfg, part,

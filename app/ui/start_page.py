@@ -13,9 +13,9 @@ from version import __version__
 from .style import RED, asset
 
 WHATS_NEW = [
+    "Ralenti calé sur le clip suivant (plus de durée à régler)",
     "Reproduire : choisis main gauche ou droite (dash, kunai...)",
-    "Fond vert : bords propres, 60 i/s, passage au choix",
-    "Fond vert en continuité + Fondu / Dissolve Luma"]
+    "Time remap ouvrable depuis Reproduire"]
 
 
 def ago(ts):
