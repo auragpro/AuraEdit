@@ -112,7 +112,7 @@ def render(project, output, progress=None, is_cancelled=None, export=None):
                         from . import markers as _mk
                         gap = remap.get("plan") or _mk.gap_for(project, path)
                         if gap:
-                            rcfg["duree_ralenti"] = max(0.1, gap - int(rcfg.get("frames_retour", 6)) / timeremap.FPS)
+                            rcfg["duree_ralenti"] = max(0.1, gap - int(rcfg.get("frames_retour", 7)) / timeremap.FPS)
                     timeremap.render(path, float(remap["debut"]), float(remap["fin"]), rcfg, part,
                                      is_cancelled,
                                      (lambda f, txt, i=i, name=name: progress((i + f) / steps,

@@ -15,7 +15,7 @@ from .style import RED, asset
 WHATS_NEW = [
     "Ralenti calé sur le clip suivant (plus de durée à régler)",
     "Reproduire : choisis main gauche ou droite (dash, kunai...)",
-    "Time remap ouvrable depuis Reproduire"]
+    "Reverse à 7 frames sur tous les clips"]
 
 
 def ago(ts):

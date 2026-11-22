@@ -28,7 +28,8 @@ DEFAULTS = {
     "courbe1": [0.39, 0.59, 0.26, 1.0],
     "courbe2": [0.33, 0.0, 0.74, 0.8],
     "duree_ralenti": 1.0,      # secondes entre la keyframe 1 et la 2
-    "frames_retour": 6,        # frames entre la keyframe 2 et la 3 (le reverse)
+    "frames_retour": 7,        # frames entre la keyframe 2 et la 3 (le reverse)
+    "retour7": False,          # passage du reverse à 7 frames sur tous les clips (une seule fois)
     "blending": True,
     "blending_mode": "motion", # "motion" (Pixel Motion), "mix" (Frame Mix) ou "off"
     "mode_v2": False,          # passage automatique au Pixel Motion (une seule fois)
@@ -67,6 +68,21 @@ def load():
         cfg["blending_mode"] = "motion"
         cfg["blending"] = True
         cfg["mode_v2"] = True
+    if not cfg.get("retour7"):                     # reverse à 7 frames partout (une seule fois)
+        cfg["frames_retour"] = 7
+        for kind in HAND_TYPES:
+            if isinstance(cfg.get(f"{kind}_reglages"), dict):
+                cfg[f"{kind}_reglages"]["frames_retour"] = 7
+        cfg["retour7"] = True
+        save(cfg)
+        d = clip_remaps()
+        for v in d.values():
+            if isinstance(v, dict):
+                v["retour"], v["r7"] = 7, True
+        try:
+            _clips_file().write_text(json.dumps(d, ensure_ascii=False, indent=1), encoding="utf-8")
+        except OSError:
+            pass
     return cfg
 
 
@@ -80,7 +96,7 @@ def cfg_for(data, cfg=None):
     if isinstance(data, dict):                     # réglages propres à ce clip (s'il en a)
         if data.get("ralenti"):
             merged["duree_ralenti"] = float(data["ralenti"])
-        if data.get("retour"):
+        if data.get("retour") and data.get("r7"):     # avant la 0.9.6 : on repasse au reverse à 7 frames
             merged["frames_retour"] = int(data["retour"])
     return merged
 
@@ -175,7 +191,7 @@ def ease(curve, u):
 
 def timing(cfg):
     t1 = max(0.05, float(cfg.get("duree_ralenti", 1.0)))
-    t2 = max(1, int(cfg.get("frames_retour", 6))) / FPS
+    t2 = max(1, int(cfg.get("frames_retour", 7))) / FPS
     return t1, t2
 
 

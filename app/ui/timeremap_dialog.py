@@ -125,10 +125,16 @@ class FramePicker(QFrame):
         prev, nxt = QPushButton("◀ -1"), QPushButton("+1 ▶")
         prev.clicked.connect(lambda: self.step(-1))
         nxt.clicked.connect(lambda: self.step(1))
+        self.num = QSpinBox()                       # frame précise, tapée au clavier
+        self.num.setPrefix("frame ")
+        self.num.setEnabled(False)
+        self.num.setKeyboardTracking(False)
+        self.num.valueChanged.connect(self._typed)
         row = QHBoxLayout()
         row.addWidget(prev)
         row.addWidget(self.slider, 1)
         row.addWidget(nxt)
+        row.addWidget(self.num)
         lay = QVBoxLayout(self)
         lay.setContentsMargins(12, 10, 12, 10)
         lay.addWidget(self.title)
@@ -142,8 +148,17 @@ class FramePicker(QFrame):
         self.slider.setValue(value)
         self.slider.blockSignals(False)
         self.slider.setEnabled(True)
+        self.num.blockSignals(True)
+        self.num.setRange(0, max(0, frames - 1))
+        self.num.blockSignals(False)
+        self.num.setEnabled(True)
         self._label()
         self.show_frame()
+
+    def _typed(self, v):
+        if v != self.slider.value():
+            self.slider.setValue(v)
+            self.show_frame()
 
     def step(self, d):
         self.slider.setValue(self.slider.value() + d)
@@ -154,6 +169,9 @@ class FramePicker(QFrame):
 
     def _label(self, *_):
         self.info.setText(f"frame {self.slider.value()}  ({self.seconds():.3f} s)")
+        self.num.blockSignals(True)
+        self.num.setValue(self.slider.value())
+        self.num.blockSignals(False)
         self.moved.emit()
 
     def show_frame(self):
@@ -182,7 +200,7 @@ class TimeRemapDialog(QDialog):
         self._glob = (self.cfg["duree_ralenti"], self.cfg["frames_retour"])
         if old.get("ralenti"):
             self.cfg["duree_ralenti"] = float(old["ralenti"])
-        if old.get("retour"):
+        if old.get("retour") and old.get("r7"):
             self.cfg["frames_retour"] = int(old["retour"])
 
         title = QLabel(f"Time remap {self.label + ' ' if self.kunai else ''}— {__import__('app.core.vclip', fromlist=['x']).name(path)}")
@@ -585,7 +603,7 @@ class TimeRemapDialog(QDialog):
             self.cfg["duree_kunai"] = round(end - start, 4)
             tr.save_kunai(self._global_cfg(), self.kind)
             data = {"type": self.kind, "debut": round(start, 4), "fin": round(end, 4),
-                    "ralenti": self.slow.value(), "retour": self.back.value(),
+                    "ralenti": self.slow.value(), "retour": self.back.value(), "r7": True,
                     "marqueur": True, "plan": round(self.gap, 4) if self.gap else None}
             self.project.remaps[self.path] = data
             tr.save_clip_remap(self.path, data)
@@ -600,7 +618,7 @@ class TimeRemapDialog(QDialog):
                 k["image"] = img
         tr.save(self._global_cfg())
         data = {"couteau": name, "debut": round(start, 4), "fin": round(end, 4),
-                "ralenti": self.slow.value(), "retour": self.back.value(),
+                "ralenti": self.slow.value(), "retour": self.back.value(), "r7": True,
                 "marqueur": True, "plan": round(self.gap, 4) if self.gap else None}
         self.project.remaps[self.path] = data
         tr.save_clip_remap(self.path, data)

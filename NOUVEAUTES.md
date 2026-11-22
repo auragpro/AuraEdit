@@ -1,3 +1,8 @@
+## Nouveautés de la version 0.9.6
+
+- **Time remap : le reverse passe à 7 frames sur tous les clips** (couteaux, kunais, dash back, dismiss), y compris ceux déjà réglés. Tu peux toujours changer la valeur dans « Durée du retour ».
+- **Time remap : choisis la frame exacte.** À côté de chaque curseur de keyframe, une case « frame » où tu tapes le numéro précis (par ex. la frame où le clip commence).
+
 ## Nouveautés de la version 0.9.5
 
 - **Time remap : plus de champ « Durée du ralenti ».** Le ralenti dure jusqu'au clip suivant : un clip qui commence à la frame 25 s'arrête à la frame 37 (début du 2e clip), le 2e va de 37 à 44, etc. Le retour est compris dedans.
