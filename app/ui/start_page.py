@@ -13,7 +13,7 @@ from version import __version__
 from .style import RED, asset
 
 WHATS_NEW = [
-    "Sans time remap : choisis la frame où le clip commence",
+    "Export plus rapide (clips préparés en parallèle)",
     "Reproduire : choisis main gauche ou droite (dash, kunai...)",
     "Chaque clip dure pile jusqu'au clip suivant"]
 

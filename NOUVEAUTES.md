@@ -1,3 +1,7 @@
+## Nouveautés de la version 0.9.9
+
+- **Export plus rapide, même qualité.** Les clips du montage sont préparés en parallèle au lieu d'un par un (plusieurs à la fois selon ton processeur ; les time remaps 2 à la fois sur un PC de 8 cœurs ou plus). Les réglages d'encodage et d'export ne changent pas.
+
 ## Nouveautés de la version 0.9.8
 
 - **Chaque clip dure son plan.** Avec ou sans time remap, un clip va de sa coupe à la coupe suivante (ex. frame 25 → 37, puis 37 → 44, etc.), quitte à être coupé. Un clip trop court garde sa dernière image jusqu'à la coupe.

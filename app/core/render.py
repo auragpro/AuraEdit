@@ -97,10 +97,21 @@ def render(project, output, progress=None, is_cancelled=None, export=None):
     steps = len(segs) + 1
     with tempfile.TemporaryDirectory(prefix="auraedit_") as tmp:
         tmp = Path(tmp)
-        parts, info, t = [], [], 0.0
-        for i, (kind, path) in enumerate(segs):
+        import os
+        import threading
+        from concurrent.futures import ThreadPoolExecutor
+        lock = threading.Lock()
+        done = [0]
+        # time remaps : déjà multi-cœurs et gourmands en mémoire -> 2 à la fois max (1 sur petit PC)
+        remap_slots = threading.Semaphore(2 if (os.cpu_count() or 4) >= 8 else 1)
+
+        def tick(txt):
             if progress:
-                progress(i / steps, f"Préparation {i + 1}/{len(segs)} : {vclip.name(path)}")
+                with lock:
+                    progress(min(0.97, done[0] / steps), txt)
+
+        def prep(i, kind, path):
+            """Prépare un plan (encodage en .mp4). Renvoie (fichier, durée, time_remap)."""
             part = tmp / f"{i:04d}.mp4"
             remap = project.remaps.get(path) if kind == "clip" else None
             plan = None
@@ -113,25 +124,17 @@ def render(project, output, progress=None, is_cancelled=None, export=None):
                 try:
                     name = vclip.name(path)
                     rcfg = timeremap.cfg_for(remap)
-                    if True:                                     # durée = plan jusqu'au clip suivant
-                        gap = plan
-                        if gap:
-                            rcfg["duree_ralenti"] = max(0.1, gap - int(rcfg.get("frames_retour", 7)) / timeremap.FPS)
-                    timeremap.render(path, float(remap["debut"]), float(remap["fin"]), rcfg, part,
-                                     is_cancelled,
-                                     (lambda f, txt, i=i, name=name: progress((i + f) / steps,
-                                                                              f"Clip {i + 1}/{len(segs)} — {txt} ({name})"))
-                                     if progress else None)
+                    if plan:                                     # durée = plan jusqu'au clip suivant
+                        rcfg["duree_ralenti"] = max(0.1, plan - int(rcfg.get("frames_retour", 7)) / timeremap.FPS)
+                    with remap_slots:
+                        timeremap.render(path, float(remap["debut"]), float(remap["fin"]), rcfg, part, is_cancelled,
+                                         (lambda f, txt, i=i, name=name: tick(f"Clip {i + 1}/{len(segs)} — {txt} ({name})"))
+                                         if progress else None)
                 except InterruptedError:
                     raise Cancelled()
                 except (ValueError, KeyError, OSError) as e:
                     raise RenderError(f"Time remap impossible pour {vclip.name(path)} :\n{e}")
-                d = duration(part)
-                info.append({"type": kind, "fichier": str(path), "debut": round(t, 3), "duree": round(d, 3),
-                             "time_remap": True})
-                parts.append(part)
-                t += d
-                continue
+                return part, duration(part), True
             ss = None
             if kind == "clip":                                   # début choisi (clip sans time remap)
                 from . import timeremap as _tr
@@ -141,10 +144,34 @@ def render(project, output, progress=None, is_cancelled=None, export=None):
             if plan:                                             # coupé pile au clip suivant
                 vfx = vf + f",tpad=stop_mode=clone:stop_duration={plan:.3f}"
                 cut = ["-t", f"{plan:.4f}"]
-            _run([ff, "-y", "-hide_banner", *vclip.input_args(path, ss=ss), "-an", "-vf", vfx, *cut, "-c:v", "libx264",
-                  "-preset", "veryfast", "-crf", "10", str(part)], is_cancelled)
-            d = duration(part)
-            info.append({"type": kind, "fichier": str(path), "debut": round(t, 3), "duree": round(d, 3)})
+            _run([ff, "-y", "-hide_banner", *vclip.input_args(path, ss=ss), "-an", "-vf", vfx, *cut,
+                  "-c:v", "libx264", "-preset", "veryfast", "-crf", "10", "-threads", "4", str(part)], is_cancelled)
+            return part, duration(part), False
+
+        def job(i, kind, path):
+            r = prep(i, kind, path)
+            with lock:
+                done[0] += 1
+            tick(f"Préparation des clips : {done[0]}/{len(segs)}")
+            return r
+
+        # plusieurs clips préparés en même temps (même réglages, même qualité : juste plus rapide)
+        workers = max(2, min(6, (os.cpu_count() or 4) // 2))
+        tick(f"Préparation des clips : 0/{len(segs)}")
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            futs = [pool.submit(job, i, kind, path) for i, (kind, path) in enumerate(segs)]
+            try:
+                results = [f.result() for f in futs]
+            except BaseException:
+                for f in futs:
+                    f.cancel()
+                raise
+        parts, info, t = [], [], 0.0
+        for (kind, path), (part, d, tr_) in zip(segs, results):
+            item = {"type": kind, "fichier": str(path), "debut": round(t, 3), "duree": round(d, 3)}
+            if tr_:
+                item["time_remap"] = True
+            info.append(item)
             parts.append(part)
             t += d
         lst = tmp / "liste.txt"
