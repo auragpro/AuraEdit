@@ -83,6 +83,26 @@ class AutoThread(QThread):
             self.failed.emit(str(e))
 
 
+class ThumbThread(QThread):
+    """Miniatures de la timeline des plans, faites en arrière-plan."""
+    got = pyqtSignal(int, bytes)
+
+    def __init__(self, jobs, parent=None):
+        super().__init__(parent)
+        self.jobs, self.stop = jobs, False
+
+    def run(self):
+        for i, path, t in self.jobs:
+            if self.stop:
+                return
+            try:
+                data = tr.grab_png(path, t, 160)
+            except Exception:
+                data = b""
+            if data:
+                self.got.emit(i, data)
+
+
 class Preview(QLabel):
     """Image de la vidéo à un instant (mise à jour un peu après le dernier changement)."""
 
@@ -331,6 +351,18 @@ class ReproduceDialog(QDialog):
         self.pick_view = Preview()
         self.pick_name = QLabel("Aucun clip choisi pour ce plan.")
         self.pick_name.setWordWrap(True)
+        # timeline : une miniature par plan (le clip choisi), clic = aller au plan
+        self.tl = QListWidget()
+        self.tl.setViewMode(QListWidget.ViewMode.IconMode)
+        self.tl.setFlow(QListWidget.Flow.LeftToRight)
+        self.tl.setWrapping(False)
+        self.tl.setIconSize(QSize(96, 54))
+        self.tl.setGridSize(QSize(106, 80))
+        self.tl.setFixedHeight(100)
+        self.tl.setMovement(QListWidget.Movement.Static)
+        self.tl.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
+        self.tl.itemClicked.connect(lambda it: self._show_seg(self.tl.row(it)))
+        self.tl_thread = None
         self.grid = QListWidget()
         self.grid.setViewMode(QListWidget.ViewMode.IconMode)
         self.grid.setIconSize(QSize(150, 84))
@@ -387,6 +419,8 @@ class ReproduceDialog(QDialog):
         lay.addLayout(trow)
         lay.addWidget(info)
         lay.addLayout(views)
+        lay.addWidget(QLabel("Timeline de tes clips (clique une image pour aller au plan) :"))
+        lay.addWidget(self.tl)
         lay.addWidget(self.grid, 1)
         lay.addLayout(row)
         return w
@@ -409,7 +443,59 @@ class ReproduceDialog(QDialog):
             self.choices = (list(self.choices) + [None] * n)[:n]
         self._fill_grid()
         self.stack.setCurrentIndex(1)
+        self._fill_timeline()
         self._show_seg(0)
+
+    # ------------------------------------------------------------ timeline
+    def _tl_src(self, i):
+        """Image à montrer pour le plan i : le clip choisi (au début de son time remap), sinon l'edit."""
+        ch = self.choices[i] if i < len(self.choices) else None
+        if ch:
+            rm = tr.clip_remaps().get(ch[1])
+            s0 = tr.clip_starts().get(str(ch[1]))
+            return ch[1], float(rm["debut"]) if rm else (s0 if s0 is not None else 0.5)
+        return self.path, (self.bounds[i] + self.bounds[i + 1]) / 2
+
+    def _tl_text(self, i):
+        return f"{i + 1}" + ("" if self.choices[i] else " · vide")
+
+    def _stop_thumbs(self):
+        if self.tl_thread is not None:
+            self.tl_thread.stop = True
+            self.tl_thread.wait()
+            self.tl_thread = None
+
+    def _fill_timeline(self):
+        self._stop_thumbs()
+        self.tl.clear()
+        n = len(self.bounds) - 1
+        jobs = []
+        for i in range(n):
+            it = QListWidgetItem(self._tl_text(i))
+            it.setToolTip(f"Plan {i + 1} : {fmt(self.bounds[i])} → {fmt(self.bounds[i + 1])}")
+            self.tl.addItem(it)
+            path, t = self._tl_src(i)
+            jobs.append((i, path, t))
+        self.tl_thread = ThumbThread(jobs, self)
+        self.tl_thread.got.connect(self._tl_icon)
+        self.tl_thread.start()
+
+    def _tl_icon(self, i, data):
+        it = self.tl.item(i)
+        pix = QPixmap()
+        if it is not None and pix.loadFromData(data):
+            it.setIcon(QIcon(pix))
+
+    def _tl_update(self, i):
+        it = self.tl.item(i)
+        if it is None:
+            return
+        it.setText(self._tl_text(i))
+        path, t = self._tl_src(i)
+        try:
+            self._tl_icon(i, tr.grab_png(path, t, 160))
+        except Exception:
+            pass
 
     def _fill_grid(self):
         self.grid.clear()
@@ -499,6 +585,9 @@ class ReproduceDialog(QDialog):
         self.seg_title.setText(f"2. Plan {i + 1} / {n}  —  {fmt(a)} → {fmt(b)}  ({b - a:.2f} s)")
         self.seg_view.show_at(self.path, (a + b) / 2)
         self.b_go.setText("Terminer  ✓" if i == n - 1 else "Plan suivant  →")
+        if self.tl.count() == n:
+            self.tl.setCurrentRow(i)
+            self.tl.scrollToItem(self.tl.item(i))
         self._show_pick()
 
     def _show_pick(self):
@@ -535,6 +624,7 @@ class ReproduceDialog(QDialog):
         self.choices[self.seg] = (name, random.choice(pool))
         self.save_state()
         self._show_pick()
+        self._tl_update(self.seg)
 
     def _remap(self):
         """Ouvre le time remap du clip choisi pour ce plan (pour le régler ou le changer)."""
@@ -552,6 +642,7 @@ class ReproduceDialog(QDialog):
             dlg = TimeRemapDialog(self.project, path, None if cat == "Dash" else cat, knives, self, gap=gap)
         dlg.exec()
         self._show_pick()
+        self._tl_update(self.seg)
 
     def _overlay(self):
         ch = self.choices[self.seg]
@@ -644,11 +735,13 @@ class ReproduceDialog(QDialog):
             msg += f" ({other} avec un autre couteau, plus de clip libre)"
         self.auto_status.setText(msg + " — vérifie et re-clique un couteau pour changer.")
         self.save_state()
+        self._fill_timeline()
         self._show_seg(0)
 
     def _skip(self):
         self.choices[self.seg] = None
         self.save_state()
+        self._tl_update(self.seg)
         self._next_seg()
 
     def _next_seg(self):
@@ -672,11 +765,31 @@ class ReproduceDialog(QDialog):
         self.project.plans = {c: plans[c] for c in clips if plans.get(c)}   # chaque clip dure son plan
         self.project.overlays = {self.choices[k][1]: ov for k, ov in self.overlays.items()
                                  if k < len(self.choices) and self.choices[k]}
+        self._keep_music()
         self.save_state()
         self.accept()
+
+    def _keep_music(self):
+        """Garde la musique de l'edit : elle devient la musique du projet."""
+        if not self.path or not Path(self.path).is_file():
+            return
+        import subprocess
+        from app.core import audio
+        d = proj.config_dir() / "musiques_edits"
+        out = d / (Path(self.path).stem + ".wav")
+        try:
+            d.mkdir(parents=True, exist_ok=True)
+            r = subprocess.run([audio.ffmpeg_exe(), "-y", "-hide_banner", "-i", str(self.path), "-vn",
+                                "-c:a", "pcm_s16le", "-ar", "48000", str(out)], capture_output=True,
+                               stdin=subprocess.DEVNULL, creationflags=audio._NO_WINDOW)
+            if r.returncode == 0 and out.is_file() and out.stat().st_size > 1000:
+                self.project.music = str(out)
+        except OSError:
+            pass
 
     def done(self, r):
         if self.thread is not None and self.thread.isRunning():
             self.thread.wait()
+        self._stop_thumbs()
         self.save_state()
         super().done(r)

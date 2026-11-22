@@ -1,3 +1,8 @@
+## Nouveautés de la version 1.0.0
+
+- **Reproduire : la musique de l'edit est gardée.** Quand tu termines, le son de l'edit que tu as mis devient la musique de ton montage.
+- **Reproduire : timeline de tes clips.** Sous les aperçus, une miniature par plan montre le clip choisi (« vide » s'il n'y en a pas). Clique une image pour aller directement à ce plan, même quand tu reprends un edit.
+
 ## Nouveautés de la version 0.9.9
 
 - **Export plus rapide, même qualité.** Les clips du montage sont préparés en parallèle au lieu d'un par un (plusieurs à la fois selon ton processeur ; les time remaps 2 à la fois sur un PC de 8 cœurs ou plus). Les réglages d'encodage et d'export ne changent pas.

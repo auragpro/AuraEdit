@@ -14,8 +14,8 @@ from .style import RED, asset
 
 WHATS_NEW = [
     "Export plus rapide (clips préparés en parallèle)",
-    "Reproduire : choisis main gauche ou droite (dash, kunai...)",
-    "Chaque clip dure pile jusqu'au clip suivant"]
+    "Reproduire : timeline des clips, clic = aller au plan",
+    "Reproduire : la musique de l'edit est gardée"]
 
 
 def ago(ts):
