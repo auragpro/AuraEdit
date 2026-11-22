@@ -1,3 +1,7 @@
+## Nouveautés de la version 0.9.8
+
+- **Chaque clip dure son plan.** Avec ou sans time remap, un clip va de sa coupe à la coupe suivante (ex. frame 25 → 37, puis 37 → 44, etc.), quitte à être coupé. Un clip trop court garde sa dernière image jusqu'à la coupe.
+
 ## Nouveautés de la version 0.9.7
 
 - **Time remap : case « 🚫 Sans time remap ».** Elle enlève le time remap du clip sans fermer la fenêtre : tu choisis alors seulement la frame où le clip commence (curseur, ◀ -1 / +1 ▶ ou numéro tapé), puis « Valider le début du clip ». Le clip commence à cette frame dans le rendu.

@@ -15,7 +15,7 @@ from .style import RED, asset
 WHATS_NEW = [
     "Sans time remap : choisis la frame où le clip commence",
     "Reproduire : choisis main gauche ou droite (dash, kunai...)",
-    "Reverse à 7 frames sur tous les clips"]
+    "Chaque clip dure pile jusqu'au clip suivant"]
 
 
 def ago(ts):

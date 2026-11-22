@@ -669,6 +669,7 @@ class ReproduceDialog(QDialog):
             if c in saved:
                 self.project.remaps[c] = dict(saved[c], plan=plans.get(c))
         self.project.clips = clips
+        self.project.plans = {c: plans[c] for c in clips if plans.get(c)}   # chaque clip dure son plan
         self.project.overlays = {self.choices[k][1]: ov for k, ov in self.overlays.items()
                                  if k < len(self.choices) and self.choices[k]}
         self.save_state()

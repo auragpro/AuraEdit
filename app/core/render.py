@@ -103,14 +103,18 @@ def render(project, output, progress=None, is_cancelled=None, export=None):
                 progress(i / steps, f"Préparation {i + 1}/{len(segs)} : {vclip.name(path)}")
             part = tmp / f"{i:04d}.mp4"
             remap = project.remaps.get(path) if kind == "clip" else None
+            plan = None
+            if kind == "clip":                                   # durée du plan : jusqu'au clip suivant
+                from . import markers as _mk
+                plan = ((getattr(project, "plans", None) or {}).get(path)
+                        or (remap or {}).get("plan") or _mk.gap_for(project, path))
             if remap:
                 from . import timeremap
                 try:
                     name = vclip.name(path)
                     rcfg = timeremap.cfg_for(remap)
                     if True:                                     # durée = plan jusqu'au clip suivant
-                        from . import markers as _mk
-                        gap = remap.get("plan") or _mk.gap_for(project, path)
+                        gap = plan
                         if gap:
                             rcfg["duree_ralenti"] = max(0.1, gap - int(rcfg.get("frames_retour", 7)) / timeremap.FPS)
                     timeremap.render(path, float(remap["debut"]), float(remap["fin"]), rcfg, part,
@@ -132,7 +136,12 @@ def render(project, output, progress=None, is_cancelled=None, export=None):
             if kind == "clip":                                   # début choisi (clip sans time remap)
                 from . import timeremap as _tr
                 ss = _tr.clip_starts().get(str(path))
-            _run([ff, "-y", "-hide_banner", *vclip.input_args(path, ss=ss), "-an", "-vf", vf, "-c:v", "libx264",
+            cut = []
+            vfx = vf
+            if plan:                                             # coupé pile au clip suivant
+                vfx = vf + f",tpad=stop_mode=clone:stop_duration={plan:.3f}"
+                cut = ["-t", f"{plan:.4f}"]
+            _run([ff, "-y", "-hide_banner", *vclip.input_args(path, ss=ss), "-an", "-vf", vfx, *cut, "-c:v", "libx264",
                   "-preset", "veryfast", "-crf", "10", str(part)], is_cancelled)
             d = duration(part)
             info.append({"type": kind, "fichier": str(path), "debut": round(t, 3), "duree": round(d, 3)})
