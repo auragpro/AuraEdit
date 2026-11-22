@@ -13,7 +13,7 @@ from version import __version__
 from .style import RED, asset
 
 WHATS_NEW = [
-    "Ralenti calé sur le clip suivant (plus de durée à régler)",
+    "Sans time remap : choisis la frame où le clip commence",
     "Reproduire : choisis main gauche ou droite (dash, kunai...)",
     "Reverse à 7 frames sur tous les clips"]
 

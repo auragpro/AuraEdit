@@ -128,7 +128,11 @@ def render(project, output, progress=None, is_cancelled=None, export=None):
                 parts.append(part)
                 t += d
                 continue
-            _run([ff, "-y", "-hide_banner", *vclip.input_args(path), "-an", "-vf", vf, "-c:v", "libx264",
+            ss = None
+            if kind == "clip":                                   # début choisi (clip sans time remap)
+                from . import timeremap as _tr
+                ss = _tr.clip_starts().get(str(path))
+            _run([ff, "-y", "-hide_banner", *vclip.input_args(path, ss=ss), "-an", "-vf", vf, "-c:v", "libx264",
                   "-preset", "veryfast", "-crf", "10", str(part)], is_cancelled)
             d = duration(part)
             info.append({"type": kind, "fichier": str(path), "debut": round(t, 3), "duree": round(d, 3)})

@@ -1,3 +1,7 @@
+## Nouveautés de la version 0.9.7
+
+- **Time remap : case « 🚫 Sans time remap ».** Elle enlève le time remap du clip sans fermer la fenêtre : tu choisis alors seulement la frame où le clip commence (curseur, ◀ -1 / +1 ▶ ou numéro tapé), puis « Valider le début du clip ». Le clip commence à cette frame dans le rendu.
+
 ## Nouveautés de la version 0.9.6
 
 - **Time remap : le reverse passe à 7 frames sur tous les clips** (couteaux, kunais, dash back, dismiss), y compris ceux déjà réglés. Tu peux toujours changer la valeur dans « Durée du retour ».

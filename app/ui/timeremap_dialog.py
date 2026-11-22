@@ -238,6 +238,10 @@ class TimeRemapDialog(QDialog):
         else:
             self.k1 = FramePicker("Keyframe 1 — début : plus de mains à l'écran", path)
             self.k2 = FramePicker("Keyframe 2 — fin : couteau sorti (jusqu'où va le time remap)", path)
+        self.k1_title = self.k1.title.text()
+        self.c_none = QCheckBox("🚫 Sans time remap : enlever le time remap de ce clip et choisir seulement "
+                                "la frame où il commence (keyframe de gauche)")
+        self.c_none.setStyleSheet("font-weight: 700;")
         frames = QHBoxLayout()
         frames.addWidget(self.k1)
         frames.addWidget(self.k2)
@@ -376,6 +380,7 @@ class TimeRemapDialog(QDialog):
             info.setWordWrap(True)
             lay.addWidget(info)
         lay.addLayout(krow)
+        lay.addWidget(self.c_none)
         lay.addLayout(frames)
         lay.addLayout(killrow)
         lay.addLayout(settings)
@@ -383,11 +388,31 @@ class TimeRemapDialog(QDialog):
         lay.addLayout(brow)
 
         self._knife_changed()
+        self._lock = [self.knife, b_img, self.c1, self.c2, self.flow, b_paste, *self.flow_btns, self.back,
+                      self.blend, self.presets, b_save_c, b_del_c, self.b_preview, self.kill, b_redo]
+        self.c_none.toggled.connect(self._mode)
+        s0 = tr.clip_starts().get(str(path))
         if old:
             self.status.setText("Time remap déjà fait pour ce clip : corrige-le ou clique « Refaire la détection ».")
             self._ready(float(old["debut"]), float(old["fin"]), None)
+        elif s0 is not None:                       # clip sans time remap dont le début est déjà choisi
+            self._ready(float(s0), float(s0) + 0.5, None)
+            self.c_none.setChecked(True)
+            self.status.setText("Ce clip n'a pas de time remap : il commence à la frame choisie à gauche.")
         else:
             self.run_detect()
+
+    def _mode(self, on):
+        """Sans time remap : seule la frame de début compte."""
+        self.k2.setVisible(not on)
+        for w in self._lock:
+            w.setEnabled(not on)
+        self.k1.title.setText("Début du clip (sans time remap) : la frame où le clip commence" if on
+                              else self.k1_title)
+        self.b_ok.setText("Valider le début du clip" if on else "Valider ce time remap")
+        if on:
+            self.status.setText("Sans time remap : choisis la frame où le clip commence (curseur, ◀ -1 / +1 ▶ "
+                                "ou tape le numéro), puis « Valider le début du clip ».")
 
     # ---------------------------------------------------------- couteau
     def _knife_data(self):
@@ -594,6 +619,13 @@ class TimeRemapDialog(QDialog):
         self.status.setText(f"Aperçu impossible : {msg[-300:]}")
 
     def validate(self):
+        if self.c_none.isChecked():               # pas de time remap : on garde juste le début du clip
+            self._save_settings()
+            tr.remove_clip_remap(self.path)
+            self.project.remaps.pop(self.path, None)
+            tr.save_clip_start(self.path, self.k1.seconds())
+            self.accept()
+            return
         start, end = self.k1.seconds(), self.k2.seconds()
         if end <= start:
             self.status.setText("La keyframe 2 (couteau sorti) doit être après la keyframe 1.")

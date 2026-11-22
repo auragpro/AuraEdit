@@ -22,6 +22,41 @@ FPS = 60
 W, H = 1920, 1080
 # zone des mains / de l'arme (en bas à droite) utilisée pour reconnaître le couteau
 REGION = "crop=iw*0.45:ih*0.55:iw*0.55:ih*0.45,scale=96:66"
+def remove_clip_remap(path):
+    """Enlève le time remap de ce clip (il redevient un clip normal)."""
+    d = clip_remaps()
+    if d.pop(str(path), None) is not None:
+        try:
+            _clips_file().write_text(json.dumps(d, ensure_ascii=False, indent=1), encoding="utf-8")
+        except OSError:
+            pass
+
+
+def _starts_file():
+    return config_dir() / "debut_clips.json"
+
+
+def clip_starts():
+    """{chemin du clip: seconde où il commence} pour les clips sans time remap."""
+    try:
+        d = json.loads(_starts_file().read_text(encoding="utf-8"))
+        return d if isinstance(d, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def save_clip_start(path, t):
+    d = clip_starts()
+    if t is None or t <= 0:
+        d.pop(str(path), None)
+    else:
+        d[str(path)] = round(float(t), 4)
+    try:
+        _starts_file().write_text(json.dumps(d, ensure_ascii=False, indent=1), encoding="utf-8")
+    except OSError:
+        pass
+
+
 RW, RH = 96, 66
 
 DEFAULTS = {

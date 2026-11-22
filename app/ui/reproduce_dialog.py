@@ -518,8 +518,11 @@ class ReproduceDialog(QDialog):
         st = getattr(self.project, attr, None) if attr else None
         side = ("  ⬅ main gauche" if st and path in st.gauche else
                 "  main droite ➡" if st and path in st.droite else "")
-        self.pick_name.setText(f"{cat}{side} : {vclip.name(path)}" + ("  (time remap ✓)" if rm else ""))
-        self.pick_view.show_at(path, float(rm["debut"]) if rm else 0.5)
+        s0 = None if rm else tr.clip_starts().get(str(path))
+        self.pick_name.setText(f"{cat}{side} : {vclip.name(path)}" + (
+            "  (time remap ✓)" if rm else f"  (sans time remap, début frame {int(round(s0 * tr.FPS))})"
+            if s0 is not None else ""))
+        self.pick_view.show_at(path, float(rm["debut"]) if rm else (s0 if s0 is not None else 0.5))
 
     def _pick(self, item):
         name, clips = item.data(ROLE)
