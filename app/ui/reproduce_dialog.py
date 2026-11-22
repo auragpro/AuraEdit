@@ -84,23 +84,50 @@ class AutoThread(QThread):
 
 
 class ThumbThread(QThread):
-    """Miniatures de la timeline des plans, faites en arrière-plan."""
-    got = pyqtSignal(int, bytes)
+    """Miniatures de la timeline des plans, faites en arrière-plan (jamais dans l'interface)."""
+    got = pyqtSignal(int, int, bytes)
 
-    def __init__(self, jobs, parent=None):
+    def __init__(self, parent=None):
         super().__init__(parent)
-        self.jobs, self.stop = jobs, False
+        import collections
+        import threading
+        self.jobs = collections.deque()
+        self.lock = threading.Lock()
+        self.wake = threading.Event()
+        self.cache = {}
+        self.stop = False
+
+    def add(self, jobs, first=False):
+        with self.lock:
+            if first:
+                self.jobs.extendleft(reversed(jobs))        # changement de clip : tout de suite
+            else:
+                self.jobs.extend(jobs)
+        self.wake.set()
+
+    def clear(self):
+        with self.lock:
+            self.jobs.clear()
 
     def run(self):
-        for i, path, t in self.jobs:
-            if self.stop:
-                return
-            try:
-                data = tr.grab_png(path, t, 160)
-            except Exception:
-                data = b""
-            if data:
-                self.got.emit(i, data)
+        while not self.stop:
+            with self.lock:
+                job = self.jobs.popleft() if self.jobs else None
+            if job is None:
+                self.wake.wait(0.3)
+                self.wake.clear()
+                continue
+            i, gen, path, t = job
+            key = (str(path), round(float(t), 3))
+            data = self.cache.get(key)
+            if data is None:
+                try:
+                    data = tr.grab_png(path, t, 160) or b""
+                except Exception:
+                    data = b""
+                self.cache[key] = data
+            if data and not self.stop:
+                self.got.emit(i, gen, data)
 
 
 class Preview(QLabel):
@@ -362,7 +389,10 @@ class ReproduceDialog(QDialog):
         self.tl.setMovement(QListWidget.Movement.Static)
         self.tl.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
         self.tl.itemClicked.connect(lambda it: self._show_seg(self.tl.row(it)))
-        self.tl_thread = None
+        self.tl_gen = []
+        self.tl_thread = ThumbThread(self)
+        self.tl_thread.got.connect(self._tl_icon)
+        self.tl_thread.start()
         self.grid = QListWidget()
         self.grid.setViewMode(QListWidget.ViewMode.IconMode)
         self.grid.setIconSize(QSize(150, 84))
@@ -462,25 +492,29 @@ class ReproduceDialog(QDialog):
     def _stop_thumbs(self):
         if self.tl_thread is not None:
             self.tl_thread.stop = True
-            self.tl_thread.wait()
+            self.tl_thread.wake.set()
+            self.tl_thread.wait(3000)
             self.tl_thread = None
 
     def _fill_timeline(self):
-        self._stop_thumbs()
+        if self.tl_thread is None:
+            return
+        self.tl_thread.clear()
         self.tl.clear()
         n = len(self.bounds) - 1
+        self.tl_gen = [g + 1 for g in (self.tl_gen + [0] * n)[:n]]
         jobs = []
         for i in range(n):
             it = QListWidgetItem(self._tl_text(i))
             it.setToolTip(f"Plan {i + 1} : {fmt(self.bounds[i])} → {fmt(self.bounds[i + 1])}")
             self.tl.addItem(it)
             path, t = self._tl_src(i)
-            jobs.append((i, path, t))
-        self.tl_thread = ThumbThread(jobs, self)
-        self.tl_thread.got.connect(self._tl_icon)
-        self.tl_thread.start()
+            jobs.append((i, self.tl_gen[i], path, t))
+        self.tl_thread.add(jobs)
 
-    def _tl_icon(self, i, data):
+    def _tl_icon(self, i, gen, data):
+        if i >= len(self.tl_gen) or gen != self.tl_gen[i]:
+            return                                   # image d'un ancien clip : ignorée
         it = self.tl.item(i)
         pix = QPixmap()
         if it is not None and pix.loadFromData(data):
@@ -488,14 +522,12 @@ class ReproduceDialog(QDialog):
 
     def _tl_update(self, i):
         it = self.tl.item(i)
-        if it is None:
+        if it is None or self.tl_thread is None or i >= len(self.tl_gen):
             return
         it.setText(self._tl_text(i))
+        self.tl_gen[i] += 1
         path, t = self._tl_src(i)
-        try:
-            self._tl_icon(i, tr.grab_png(path, t, 160))
-        except Exception:
-            pass
+        self.tl_thread.add([(i, self.tl_gen[i], path, t)], first=True)
 
     def _fill_grid(self):
         self.grid.clear()
@@ -614,7 +646,16 @@ class ReproduceDialog(QDialog):
         self.pick_view.show_at(path, float(rm["debut"]) if rm else (s0 if s0 is not None else 0.5))
 
     def _pick(self, item):
-        name, clips = item.data(ROLE)
+        data = item.data(ROLE) if item is not None else None
+        if not data or not (item.flags() & Qt.ItemFlag.ItemIsEnabled):
+            return
+        name, clips = data
+        clips = [c for c in clips if vclip.exists(c)]
+        if not clips:
+            self.auto_status.setText(f"Aucun clip dans « {name} » ici : ajoute-en avec « ➕ Ajouter des clips ».")
+            return
+        if not (0 <= self.seg < len(self.choices)):
+            return
         used = {c[1] for k, c in enumerate(self.choices) if c and k != self.seg}
         cur = self.choices[self.seg][1] if self.choices[self.seg] else None
         free = [c for c in clips if c not in used and c != cur] or [c for c in clips if c != cur] or clips

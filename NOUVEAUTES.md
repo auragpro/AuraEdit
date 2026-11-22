@@ -1,3 +1,8 @@
+## Nouveautés de la version 1.0.1
+
+- **Correction : plus de plantage dans Reproduire** quand on clique une case sans clip (ex. « Dash back gauche — 0 clip(s) ») : un message dit d'ajouter des clips à la place.
+- **Timeline plus fluide** : les miniatures se font en arrière-plan (même quand tu changes de clip) et sont gardées en mémoire, l'interface ne se fige plus.
+
 ## Nouveautés de la version 1.0.0
 
 - **Reproduire : la musique de l'edit est gardée.** Quand tu termines, le son de l'edit que tu as mis devient la musique de ton montage.
