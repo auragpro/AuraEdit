@@ -1,3 +1,7 @@
+## Nouveautés de la version 1.0.2
+
+- **Interface plus propre** : barres de défilement fines, cases à cocher et boutons radio rouges, champs qui s'allument en rouge quand tu écris dedans, menus et listes déroulantes arrondis, info-bulles, onglets, cases numériques (frames, durées) et boutons qui réagissent au clic.
+
 ## Nouveautés de la version 1.0.1
 
 - **Correction : plus de plantage dans Reproduire** quand on clique une case sans clip (ex. « Dash back gauche — 0 clip(s) ») : un message dit d'ajouter des clips à la place.

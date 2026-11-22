@@ -13,7 +13,7 @@ from version import __version__
 from .style import RED, asset
 
 WHATS_NEW = [
-    "Export plus rapide (clips préparés en parallèle)",
+    "Interface plus propre (barres, cases, menus...)",
     "Reproduire : timeline des clips, clic = aller au plan",
     "Reproduire : la musique de l'edit est gardée"]
 
