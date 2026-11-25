@@ -291,6 +291,23 @@ def render(project, output, progress=None, is_cancelled=None, export=None):
         video, is_list = _overlays(project, info, video, video == lst, tmp, ff, int(t * FPS) + 1,
                                    (lambda f, txt: progress(min(0.98, (len(segs) + 0.5 + f * 0.4) / steps), txt))
                                    if progress else None, is_cancelled)
+        texts = [x for x in (getattr(project, "texts", None) or []) if isinstance(x, dict) and x.get("texte")]
+        if texts:                                        # textes (biseautage + incrustation)
+            if progress:
+                progress(min(0.98, (len(segs) + 0.85) / steps), "Textes...")
+            src = video
+            if is_list:
+                src = tmp / "base_txt.mp4"
+                _run([ff, "-y", "-hide_banner", "-f", "concat", "-safe", "0", "-i", str(lst), "-c:v", "copy",
+                      str(src)], is_cancelled)
+            offset = next((s["debut"] for s in info if s.get("tl")), 0.0)
+            from . import textfx
+            try:
+                video = textfx.ffmpeg_texts(ff, src, texts, tmp / "textes.mp4", W, H, t, offset,
+                                            lambda c: _run(c, is_cancelled), tmp)
+            except RenderError as e:
+                raise RenderError(f"Textes impossibles :\n{e}")
+            is_list = False
         if is_list:
             cmd = [ff, "-y", "-hide_banner", "-f", "concat", "-safe", "0", "-i", str(lst)]
         else:

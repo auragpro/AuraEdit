@@ -102,6 +102,7 @@ class Project:
     shakes: dict = field(default_factory=dict)          # {"actif", "in", "out", "duree", "seed"}
     plans: dict = field(default_factory=dict)           # {clip: durée du plan (jusqu'au clip suivant)}
     timeline: list = field(default_factory=list)        # Reproduire : [{"clip", "duree", "plan", ...}] dans l'ordre
+    texts: list = field(default_factory=list)           # textes posés sur l'edit (police, biseautage, incrustation)
     overlays: dict = field(default_factory=dict)        # {clip: réglages chroma} vidéo superposée (fond vert)
     markers: list = field(default_factory=list)         # [{"t", "type": clip|dash|kunai}] sur la musique          # {clip: {"couteau", "debut", "fin"}} time remap
     path: str | None = None                             # fichier .auraedit (non sauvegardé dedans)
@@ -159,6 +160,7 @@ class Project:
             overlays=data.get("overlays") if isinstance(data.get("overlays"), dict) else {},
             plans=data.get("plans") if isinstance(data.get("plans"), dict) else {},
             timeline=data.get("timeline") if isinstance(data.get("timeline"), list) else [],
+            texts=data.get("texts") if isinstance(data.get("texts"), list) else [],
             markers=[m for m in data.get("markers") or [] if isinstance(m, dict) and "t" in m],
             path=str(path),
         )

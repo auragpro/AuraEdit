@@ -131,10 +131,14 @@ class ThumbThread(QThread):
 
 
 class Preview(QLabel):
-    """Image de la vidéo à un instant (mise à jour un peu après le dernier changement). S'agrandit avec la page."""
+    """Image de la vidéo à un instant (mise à jour un peu après le dernier changement). S'agrandit avec la page.
+    L'image est lue en arrière-plan : l'interface ne se fige jamais."""
+    _got = pyqtSignal(int, bytes)
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self._got.connect(self._loaded)
+        self._lgen = 0
         self.setMinimumSize(320, 180)
         self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -153,12 +157,26 @@ class Preview(QLabel):
     def _load(self):
         if not self.path:
             return
-        pix = QPixmap()
-        try:
-            pix.loadFromData(tr.grab_png(self.path, self.t, 960))
-        except Exception:
+        import threading
+        self._lgen += 1
+        gen, path, t = self._lgen, self.path, self.t
+
+        def run():
+            try:
+                data = tr.grab_png(path, t, 960) or b""
+            except Exception:                    # noqa: BLE001
+                data = b""
+            try:
+                self._got.emit(gen, data)
+            except RuntimeError:                 # page fermée entre-temps
+                pass
+        threading.Thread(target=run, daemon=True).start()
+
+    def _loaded(self, gen, data):
+        if gen != self._lgen or self.playing():
             return
-        if not pix.isNull():
+        pix = QPixmap()
+        if data and pix.loadFromData(data):
             self._pix = pix
             self._fit()
 
@@ -172,42 +190,92 @@ class Preview(QLabel):
         self._fit()
 
     # ---------------------------------------------------------------- lecture (barre espace)
-    PW, PH, PFPS = 480, 270, 30
+    PW, PH, PFPS = 384, 216, 30
 
-    def play(self, path, start, dur):
-        """Joue le passage tout de suite : les images arrivent au fil du décodage (pas d'attente)."""
+    def play(self, path, start, dur, t0=None):
+        self.play_seq([("stream", path, start, dur)], t0)
+
+    def play_seq(self, items, t0=None):
+        """Lit une suite de morceaux sans attendre : ("stream", clip, début, durée) lu tel quel,
+        ("times", clip, [temps source à 30 i/s]) pour un time remap, ("black", nb d'images) = écran noir.
+        t0 : horloge commune (time.monotonic) pour que 2 vidéos restent synchronisées."""
         import subprocess
         import threading
+        import time as _t
         from app.core import audio
         self.stop()
-        self._frames, self._i, self._alive, self._decoding = [], 0, True, True
+        frames = {}
+        self._frames, self._i, self._alive, self._decoding = frames, 0, True, True
         self._gen = gen = getattr(self, "_gen", 0) + 1
+        self._t0 = t0 or _t.monotonic()
+        self._last = None
         if getattr(self, "_ptimer", None) is None:
             self._ptimer = QTimer(self)
             self._ptimer.timeout.connect(self._tick)
-        size = self.PW * self.PH * 3
-        cmd = [audio.ffmpeg_exe(), "-hide_banner", "-loglevel", "error",
-               *vclip.input_args(path, ss=max(0.0, start)), "-t", f"{max(0.05, dur):.3f}", "-an", "-vf",
-               f"fps={self.PFPS},scale={self.PW}:{self.PH}:force_original_aspect_ratio=decrease,"
-               f"pad={self.PW}:{self.PH}:(ow-iw)/2:(oh-ih)/2,format=rgb24", "-f", "rawvideo", "-"]
+        W, H, F = self.PW, self.PH, self.PFPS
+        size = W * H * 3
+        black = bytes(size)
+        vf = (f"scale={W}:{H}:force_original_aspect_ratio=decrease,pad={W}:{H}:(ow-iw)/2:(oh-ih)/2,"
+              f"format=rgb24")
 
-        def run(frames=self._frames):
+        def alive():
+            return self._alive and self._gen == gen
+
+        def wait_room(n):
+            while alive() and n - self._i > 90:          # pas plus de 3 s d'avance (mémoire)
+                _t.sleep(0.02)
+
+        def proc(args, fps):
+            return subprocess.Popen([audio.ffmpeg_exe(), "-hide_banner", "-loglevel", "error", *args, "-an", "-vf",
+                                     f"fps={fps},{vf}", "-f", "rawvideo", "-"], stdout=subprocess.PIPE,
+                                    stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL,
+                                    creationflags=audio._NO_WINDOW)
+
+        def run():
+            n = 0
             try:
-                p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-                                     stdin=subprocess.DEVNULL, creationflags=audio._NO_WINDOW)
-                self._proc = p
-                while self._alive:
-                    buf = p.stdout.read(size)
-                    if len(buf) < size:
+                for it in items:
+                    if not alive():
                         break
-                    frames.append(buf)
-                p.kill()
+                    if it[0] == "black":
+                        for _ in range(it[1]):
+                            wait_room(n)
+                            frames[n] = black
+                            n += 1
+                    elif it[0] == "stream":
+                        _, path, start, dur = it
+                        p = proc([*vclip.input_args(path, ss=max(0.0, start)), "-t", f"{max(0.04, dur):.3f}"], F)
+                        while alive():
+                            wait_room(n)
+                            buf = p.stdout.read(size)
+                            if len(buf) < size:
+                                break
+                            frames[n] = buf
+                            n += 1
+                        p.kill()
+                    else:                                     # time remap : on pioche les bonnes images
+                        _, path, times = it
+                        lo, hi = max(0.0, min(times) - 0.05), max(times) + 0.05
+                        p = proc([*vclip.input_args(path, ss=lo), "-t", f"{hi - lo:.3f}"], 60)
+                        src = []
+                        while alive():
+                            buf = p.stdout.read(size)
+                            if len(buf) < size:
+                                break
+                            src.append(buf)
+                        p.kill()
+                        for t in times:
+                            wait_room(n)
+                            frames[n] = src[min(len(src) - 1, max(0, int(round((t - lo) * 60))))] if src else black
+                            n += 1
             except OSError:
                 pass
             if self._gen == gen:
                 self._decoding = False
+                self._total = n
+        self._total = None
         threading.Thread(target=run, daemon=True).start()
-        self._ptimer.start(int(1000 / self.PFPS))
+        self._ptimer.start(int(1000 / F))
 
     def stop(self):
         self._alive = False
@@ -219,49 +287,178 @@ class Preview(QLabel):
         return bool(getattr(self, "_ptimer", None) and self._ptimer.isActive())
 
     def _tick(self):
+        import time as _t
         from PyQt6.QtGui import QImage
-        fr = self._frames
-        if not fr:
+        idx = int((_t.monotonic() - self._t0) * self.PFPS)
+        if self._total is not None and idx >= self._total:
+            self.stop()                                    # fin de la lecture
             return
-        if self._i >= len(fr):
-            if self._decoding:                     # la suite arrive : on attend
-                return
-            self._i = 0                            # en boucle
-        img = QImage(fr[self._i], self.PW, self.PH, self.PW * 3, QImage.Format.Format_RGB888)
+        fr = self._frames
+        while self._i < idx and self._i in fr:            # on libère les images déjà passées
+            fr.pop(self._i, None)
+            self._i += 1
+        buf = fr.get(idx)
+        if buf is None:
+            return                                         # pas encore décodée : on garde l'image d'avant
+        self._i = idx
+        img = QImage(buf, self.PW, self.PH, self.PW * 3, QImage.Format.Format_RGB888)
         self.setPixmap(QPixmap.fromImage(img).scaled(self.size(), Qt.AspectRatioMode.KeepAspectRatio,
                                                      Qt.TransformationMode.SmoothTransformation))
-        self._i += 1
 
 
-class MarkerBar(QWidget):
-    """Barre de temps du montage : un losange par coupe (shake). Plus gros = shake plus fort, gris = pas de shake."""
-    picked = pyqtSignal(int)
+class TextPreview(Preview):
+    """Image du clip + le texte posé dessus (biseautage, incrustation), recalculée à chaque réglage."""
+    PREV = (640, 360)
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setMinimumHeight(70)
+        self.cfg, self._base = None, None
+
+    def set_cfg(self, cfg):
+        self.cfg = cfg
+        self._compose()
+
+    def _loaded(self, gen, data):
+        if gen != self._lgen:
+            return
+        from PyQt6.QtGui import QImage
+        import numpy as np
+        img = QImage.fromData(data)
+        if img.isNull():
+            return
+        w, h = self.PREV
+        img = img.scaled(w, h).convertToFormat(QImage.Format.Format_RGB888)
+        ptr = img.constBits()
+        ptr.setsize(img.bytesPerLine() * h)
+        self._base = np.frombuffer(ptr, np.uint8).reshape(h, img.bytesPerLine())[:, :w * 3].reshape(h, w, 3).copy()
+        self._compose()
+
+    def _compose(self):
+        if self._base is None:
+            return
+        import numpy as np
+        from PyQt6.QtGui import QImage
+        from app.core import textfx
+        out = self._base
+        w, h = self.PREV
+        if self.cfg and self.cfg.get("texte"):
+            try:
+                c = textfx.full(self.cfg)
+                out = textfx.blend(self._base, textfx.layer(c, w, h, scale=w / 1920), c["mode"])
+            except Exception:                    # noqa: BLE001
+                out = self._base
+        out = np.ascontiguousarray(out)
+        self._pix = QPixmap.fromImage(QImage(out.data, w, h, w * 3, QImage.Format.Format_RGB888).copy())
+        self._fit()
+
+
+DUR_LABELS = {1: "très court", 3: "court", 5: "normal", 7: "long", 9: "très long"}
+
+
+class DurCombo(QComboBox):
+    """Durée du shake (1 à 9) en liste déroulante ; mêmes fonctions qu'une case numérique."""
+    valueChanged = pyqtSignal(int)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        for i in range(1, 10):
+            self.addItem(f"Durée {i}" + (f" · {DUR_LABELS[i]}" if i in DUR_LABELS else ""), i)
+        self.setCurrentIndex(4)
+        self.currentIndexChanged.connect(lambda _: self.valueChanged.emit(self.value()))
+
+    def value(self):
+        return int(self.currentData() or 5)
+
+    def setValue(self, v):
+        self.setCurrentIndex(max(0, min(8, int(v) - 1)))
+
+
+GROUP_COLORS = ["#ff4655", "#3d9bff", "#ffb020", "#2ed47a", "#b06bff", "#ff6bd5", "#20d5d5", "#f5f5f5",
+                "#ff8a3d", "#9be22d"]
+
+
+def group_key(cfg):
+    return (cfg["sens"], cfg["niveau"], cfg["duree"]) if cfg else None
+
+
+class MarkerBar(QWidget):
+    """Barre de temps du montage : un losange par coupe (shake). Une couleur par groupe de réglages,
+    plus gros = plus fort, gris = pas de shake. Clic = choisir ; Ctrl/Maj + clic ou glisser = plusieurs."""
+    picked = pyqtSignal(int)
+    selection = pyqtSignal(list)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setMinimumHeight(78)
         self.total, self.cuts, self.cfgs, self.sel = 1.0, [], [], 0
+        self.chosen = set()
+        self.groups = {}
+        self._press = None
 
     def set(self, total, cuts, cfgs):
         self.total, self.cuts, self.cfgs = max(0.01, total), list(cuts), list(cfgs)
+        keys = []
+        for c in self.cfgs:
+            k = group_key(c)
+            if k and k not in keys:
+                keys.append(k)
+        self.groups = {k: GROUP_COLORS[i % len(GROUP_COLORS)] for i, k in enumerate(sorted(keys))}
         self.update()
 
     def select(self, i):
         self.sel = i
+        if i not in self.chosen:
+            self.chosen = {i}
         self.update()
 
     def _x(self, t):
         return 12 + (self.width() - 24) * t / self.total
 
+    def _nearest(self, x):
+        return min(range(len(self.cuts)), key=lambda i: abs(self._x(self.cuts[i]) - x))
+
     def mousePressEvent(self, e):
-        if self.cuts:
-            x = e.position().x()
-            self.picked.emit(min(range(len(self.cuts)), key=lambda i: abs(self._x(self.cuts[i]) - x)))
+        if not self.cuts:
+            return
+        x = e.position().x()
+        i = self._nearest(x)
+        mods = e.modifiers()
+        if mods & (Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.ShiftModifier):
+            if mods & Qt.KeyboardModifier.ShiftModifier:
+                a, b = sorted((self.sel, i))
+                self.chosen |= set(range(a, b + 1))
+            elif i in self.chosen and len(self.chosen) > 1:
+                self.chosen.discard(i)
+            else:
+                self.chosen.add(i)
+            self.sel = i
+            self.update()
+            self.selection.emit(sorted(self.chosen))
+            return
+        self._press = x
+        self.chosen = {i}
+        self.sel = i
+        self.update()
+        self.picked.emit(i)
+        self.selection.emit([i])
+
+    def mouseMoveEvent(self, e):
+        if self._press is None or not self.cuts:
+            return
+        a, b = sorted((self._press, e.position().x()))
+        if b - a < 6:
+            return
+        self.chosen = {i for i, c in enumerate(self.cuts) if a - 6 <= self._x(c) <= b + 6} or self.chosen
+        self.update()
+        self.selection.emit(sorted(self.chosen))
+
+    def mouseReleaseEvent(self, e):
+        self._press = None
 
     def paintEvent(self, e):
         from PyQt6.QtCore import QPointF
         from PyQt6.QtGui import QColor, QPainter, QPolygonF
-        from .style import BORDER, PANEL_2, RED as ACC
+        from .style import BORDER, PANEL_2
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         mid = self.height() / 2
@@ -275,11 +472,12 @@ class MarkerBar(QWidget):
             cfg = self.cfgs[i] if i < len(self.cfgs) else None
             r = 5 + (cfg["niveau"] * 2 if cfg else 0)
             x = self._x(c)
-            col = QColor(ACC) if cfg else QColor("#555a66")
-            if i == self.sel:
+            col = QColor(self.groups.get(group_key(cfg), "#ff4655")) if cfg else QColor("#555a66")
+            if i in self.chosen:
                 p.setBrush(QColor("#ffffff"))
-                p.drawPolygon(QPolygonF([QPointF(x, mid - r - 4), QPointF(x + r + 4, mid), QPointF(x, mid + r + 4),
-                                         QPointF(x - r - 4, mid)]))
+                g = 4 if i == self.sel else 3
+                p.drawPolygon(QPolygonF([QPointF(x, mid - r - g), QPointF(x + r + g, mid), QPointF(x, mid + r + g),
+                                         QPointF(x - r - g, mid)]))
             p.setBrush(col)
             p.drawPolygon(QPolygonF([QPointF(x, mid - r), QPointF(x + r, mid), QPointF(x, mid + r),
                                      QPointF(x - r, mid)]))
@@ -296,12 +494,14 @@ class ReproduceDialog(QDialog):
         self.choices = []                 # par plan : (catégorie, chemin) ou None
         self.overlays = {}                # par plan : réglages de la vidéo superposée (fond vert)
         self.fx = {}                      # par plan : {"fondu": ms, "shake": None / {"off"} / réglage}
+        self.texts = []                   # textes de l'edit (étape 3)
         self.seg = 0
         self.thread = None
         self.stack = QStackedWidget()
         self.stack.addWidget(self._page_cuts())
         self.stack.addWidget(self._page_choose())
         self.stack.addWidget(self._page_shakes())
+        self.stack.addWidget(self._page_texts())          # index 3 : textes (avant les shakes)
         from PyQt6.QtGui import QKeySequence, QShortcut
         sc = QShortcut(QKeySequence(Qt.Key.Key_Space), self)
         sc.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
@@ -406,7 +606,7 @@ class ReproduceDialog(QDialog):
         d[self.path] = {"cuts": [round(c, 4) for c in sorted(self.cuts)], "length": self.length, "fps": self.fps,
                         "choices": [list(c) if c else None for c in self.choices],
                         "overlays": {str(k): v for k, v in self.overlays.items()},
-                        "fx": {str(k): v for k, v in self.fx.items()}, "date": time.time()}
+                        "fx": {str(k): v for k, v in self.fx.items()}, "textes": self.texts, "date": time.time()}
         write_saved(d)
 
     def load_edit(self, path):
@@ -422,6 +622,7 @@ class ReproduceDialog(QDialog):
         self.choices = [tuple(c) if c else None for c in e.get("choices", [])]
         self.overlays = {int(k): v for k, v in (e.get("overlays") or {}).items()}
         self.fx = {int(k): v for k, v in (e.get("fx") or {}).items() if isinstance(v, dict)}
+        self.texts = [t for t in (e.get("textes") or []) if isinstance(t, dict)]
         self.slider.setRange(0, max(1, int(self.length * self.fps) - 1))
         self.slider.setEnabled(True)
         self._fill_cuts()
@@ -448,7 +649,7 @@ class ReproduceDialog(QDialog):
             self.load_edit(f)                     # déjà découpé : on reprend là où on en était
             return
         self.path = f
-        self.choices, self.overlays, self.fx = [], {}, {}
+        self.choices, self.overlays, self.fx, self.texts = [], {}, {}, []
         self.cut_status.setText("Je cherche les transitions...")
         self.thread = CutsThread(f, self)
         self.thread.done.connect(self._cuts_found)
@@ -586,10 +787,7 @@ class ReproduceDialog(QDialog):
         for sens in ("in", "out"):
             for n in range(1, 6):
                 self.fx_shake.addItem(f"Shake {sens.upper()} {n}x", (sens, n))
-        self.fx_dur = QSpinBox()
-        self.fx_dur.setRange(1, 9)
-        self.fx_dur.setValue(5)
-        self.fx_dur.setPrefix("durée ")
+        self.fx_dur = DurCombo()
         for w_ in (self.fx_fade, self.fx_dur):
             w_.valueChanged.connect(self._fx_changed)
         self.fx_shake.currentIndexChanged.connect(self._fx_changed)
@@ -864,7 +1062,7 @@ class ReproduceDialog(QDialog):
         n = len(self.bounds) - 1
         self.seg_title.setText(f"2. Plan {i + 1} / {n}  —  {fmt(a)} → {fmt(b)}  ({b - a:.2f} s)")
         self.seg_view.show_at(self.path, (a + b) / 2)
-        self.b_go.setText("Étape 3 : shakes  →" if i == n - 1 else "Plan suivant  →")
+        self.b_go.setText("Étape 3 : textes  →" if i == n - 1 else "Plan suivant  →")
         if self.tl.count() == n:
             self.tl.setCurrentRow(i)
             self.tl.scrollToItem(self.tl.item(i))
@@ -922,7 +1120,34 @@ class ReproduceDialog(QDialog):
         s0 = tr.clip_starts().get(str(path))
         return float(rm["debut"]) if rm else float(s0 or 0.0)
 
+    def _plan_item(self, k):
+        """Morceau à lire pour le plan k : ton clip avec SON time remap (ou écran noir si pas de clip)."""
+        F = Preview.PFPS
+        d = self.bounds[k + 1] - self.bounds[k]
+        n = max(1, int(round(d * F)))
+        ch = self.choices[k] if k < len(self.choices) else None
+        if not ch:
+            return ("black", n)
+        path = ch[1]
+        fx = self.fx.get(k) or {}
+        try:
+            man = fx.get("manuel")
+            if man and man.get("keys"):
+                ts = tr.manual_times(man["keys"], man.get("courbes") or [], d)
+                return ("times", path, [ts[min(len(ts) - 1, int(i * tr.FPS / F))] for i in range(n)])
+            rm = tr.clip_remaps().get(path) or self.project.remaps.get(path)
+            if rm:
+                rcfg = tr.cfg_for(rm)
+                rcfg["duree_ralenti"] = max(0.1, d - int(rcfg.get("frames_retour", 7)) / tr.FPS)
+                total = sum(tr.timing(rcfg))
+                return ("times", path, [tr.source_time(min(i / F, total), float(rm["debut"]), float(rm["fin"]), rcfg)
+                                        for i in range(n)])
+        except Exception:                          # noqa: BLE001
+            pass
+        return ("stream", path, self._clip_start(path), d)
+
     def _space(self):
+        import time as _t
         page = self.stack.currentIndex()
         if page == 1:
             views = (self.seg_view, self.pick_view)
@@ -931,11 +1156,11 @@ class ReproduceDialog(QDialog):
                     v.stop()
                 self._show_seg(self.seg)
                 return
-            a, b = self.bounds[self.seg], self.bounds[self.seg + 1]
-            self.seg_view.play(self.path, a, b - a)
-            ch = self.choices[self.seg]
-            if ch:
-                self.pick_view.play(ch[1], self._clip_start(ch[1]), b - a)
+            # lecture continue à partir de ce plan : l'edit à gauche, tes clips (time remap compris) en dessous
+            a = self.bounds[self.seg]
+            t0 = _t.monotonic() + 0.15
+            self.seg_view.play(self.path, a, self.length - a, t0)
+            self.pick_view.play_seq([self._plan_item(k) for k in range(self.seg, len(self.bounds) - 1)], t0)
         elif page == 2:
             if self.sh_view.playing():
                 self.sh_view.stop()
@@ -965,30 +1190,42 @@ class ReproduceDialog(QDialog):
             self._show_fx()
 
     def _pick_fade_start(self, cur_ms):
-        """Petite fenêtre : on choisit la frame de l'edit où le fondu commence (avant la coupe)."""
-        cut = self.bounds[self.seg]
-        lo = max(self.bounds[self.seg - 1] if self.seg > 0 else 0.0, cut - 1.5)
-        n = max(1, int(round((cut - lo) * self.fps)))
+        """Petite fenêtre : sur TON clip, on choisit la frame où le fondu commence (avant le début du clip)."""
+        ch = self.choices[self.seg] if self.seg < len(self.choices) else None
+        if not ch:
+            QMessageBox.information(self, "Fondu", "Choisis d'abord le clip de ce plan : le fondu se fait sur lui.")
+            return 0
+        path = ch[1]
+        cut = self._clip_start(path)                     # là où ton clip commence dans le montage
+        lo = max(0.0, cut - 1.5)
+        if cut - lo < 2 / 60:
+            QMessageBox.information(self, "Fondu", "Ton clip commence tout au début de la vidéo : il n'y a pas "
+                                                   "d'images avant pour faire le fondu. Recule son début "
+                                                   "(time remap ou « Sans time remap ») pour en avoir.")
+            return 0
+        fps = 60.0
+        n = max(1, int(round((cut - lo) * fps)))
         dlg = QDialog(self)
         dlg.setWindowTitle("Fondu : où il commence")
         dlg.resize(720, 520)
         view = Preview()
         sl = QSlider(Qt.Orientation.Horizontal)
         sl.setRange(0, n - 1)
-        sl.setValue(max(0, n - max(1, int(round(cur_ms / 1000 * self.fps)))))
+        sl.setValue(max(0, n - max(1, int(round(cur_ms / 1000 * fps)))))
         lab = QLabel()
+        lab.setWordWrap(True)
 
         def upd(v):
-            t = lo + v / self.fps
-            lab.setText(f"Le fondu commence ici : {(cut - t) * 1000:.0f} ms avant la coupe "
-                        f"(le clip d'après passe de 0 à 100 % d'opacité jusqu'à la coupe).")
-            view.show_at(self.path, t)
+            t = lo + v / fps
+            lab.setText(f"Le fondu commence sur cette image de ton clip : {(cut - t) * 1000:.0f} ms avant son début. "
+                        f"Ton clip apparaît de 0 à 100 % d'opacité par-dessus le clip d'avant jusqu'à la coupe.")
+            view.show_at(path, t)
         sl.valueChanged.connect(upd)
         upd(sl.value())
         ok = QPushButton("Valider le fondu")
         ok.setObjectName("primary")
         ok.clicked.connect(dlg.accept)
-        k = QLabel("FONDU D'OPACITÉ · CHOISIS LE DÉBUT")
+        k = QLabel(f"FONDU D'OPACITÉ · {vclip.name(path).upper()} · CHOISIS LE DÉBUT")
         k.setObjectName("kicker")
         lay = QVBoxLayout(dlg)
         lay.addWidget(k)
@@ -998,28 +1235,250 @@ class ReproduceDialog(QDialog):
         lay.addWidget(ok, alignment=Qt.AlignmentFlag.AlignRight)
         if not dlg.exec():
             return 0
-        return max(20, int(round((cut - (lo + sl.value() / self.fps)) * 1000)))
+        return max(20, int(round((cut - (lo + sl.value() / fps)) * 1000)))
 
-    # ------------------------------------------------------------ étape 3 : shakes
+    # ------------------------------------------------------------ étape 3 : textes
+    def _page_texts(self):
+        from PyQt6.QtWidgets import QFontComboBox, QFormLayout, QLineEdit
+        from app.core import textfx
+        w = QWidget()
+        title = QLabel("3. Les textes")
+        title.setStyleSheet("font-size: 18px; font-weight: 700;")
+        info = QLabel("Ajoute des textes sur ton edit : police de ton PC, effet « Biseautage et estampage » et mode "
+                      "« Incrustation » (le texte devient transparent, on ne voit que son relief). Choisis sur quels "
+                      "plans il apparaît. Pas de texte ? Passe directement aux shakes.")
+        info.setWordWrap(True)
+        info.setObjectName("hint")
+        self.tx_view = TextPreview()
+        self.tx_list = QListWidget()
+        self.tx_list.setMaximumHeight(130)
+        self.tx_list.currentRowChanged.connect(self._tx_pick)
+        b_new = QPushButton("➕ Nouveau texte")
+        b_new.setObjectName("primary")
+        b_new.clicked.connect(self._tx_new)
+        b_del = QPushButton("🗑 Supprimer")
+        b_del.clicked.connect(self._tx_del)
+        self.tx_text = QLineEdit()
+        self.tx_text.setPlaceholderText("Ton texte (ex. AT)")
+        self.tx_font = QFontComboBox()
+        self.tx_size = QSpinBox()
+        self.tx_size.setRange(20, 900)
+        self.tx_size.setSuffix(" px")
+        self.tx_bold = QCheckBox("Gras")
+        self.tx_x = QSlider(Qt.Orientation.Horizontal)
+        self.tx_y = QSlider(Qt.Orientation.Horizontal)
+        for sl in (self.tx_x, self.tx_y):
+            sl.setRange(-50, 50)
+        self.tx_bev = QCheckBox("Biseautage et estampage")
+        self.tx_bsize = QSlider(Qt.Orientation.Horizontal)
+        self.tx_bsize.setRange(1, 40)
+        self.tx_bforce = QSlider(Qt.Orientation.Horizontal)
+        self.tx_bforce.setRange(5, 100)
+        self.tx_fill = QSlider(Qt.Orientation.Horizontal)
+        self.tx_fill.setRange(-40, 60)
+        self.tx_mode = QComboBox()
+        for code, label in textfx.MODES:
+            self.tx_mode.addItem(label, code)
+        self.tx_color = QPushButton("Couleur")
+        self.tx_color.clicked.connect(self._tx_color)
+        self.tx_from = QSpinBox()
+        self.tx_to = QSpinBox()
+        self.tx_from.setPrefix("du plan ")
+        self.tx_to.setPrefix("au plan ")
+        b_here = QPushButton("Plan affiché")
+        b_here.setToolTip("Le texte commence au plan affiché à l'étape 2.")
+        b_here.clicked.connect(lambda: (self.tx_from.setValue(self.seg + 1), self.tx_to.setValue(self.seg + 1)))
+        for wd in (self.tx_text,):
+            wd.textChanged.connect(self._tx_edit)
+        self.tx_font.currentFontChanged.connect(self._tx_edit)
+        for wd in (self.tx_size, self.tx_from, self.tx_to):
+            wd.valueChanged.connect(self._tx_edit)
+        for wd in (self.tx_x, self.tx_y, self.tx_bsize, self.tx_bforce, self.tx_fill):
+            wd.valueChanged.connect(self._tx_edit)
+        for wd in (self.tx_bold, self.tx_bev):
+            wd.toggled.connect(self._tx_edit)
+        self.tx_mode.currentIndexChanged.connect(self._tx_edit)
+        form = QFormLayout()
+        form.addRow("Texte", self.tx_text)
+        form.addRow("Police (de ton PC)", self.tx_font)
+        r1 = QHBoxLayout()
+        r1.addWidget(self.tx_size)
+        r1.addWidget(self.tx_bold)
+        form.addRow("Taille", r1)
+        form.addRow("Position X", self.tx_x)
+        form.addRow("Position Y", self.tx_y)
+        form.addRow("Effet", self.tx_bev)
+        form.addRow("Taille du biseau", self.tx_bsize)
+        form.addRow("Profondeur", self.tx_bforce)
+        r2 = QHBoxLayout()
+        r2.addWidget(self.tx_mode, 1)
+        r2.addWidget(self.tx_color)
+        form.addRow("Mode de fusion", r2)
+        form.addRow("Remplissage", self.tx_fill)
+        r3 = QHBoxLayout()
+        r3.addWidget(self.tx_from)
+        r3.addWidget(self.tx_to)
+        r3.addWidget(b_here)
+        form.addRow("Apparaît", r3)
+        self.tx_editor = QWidget()
+        self.tx_editor.setLayout(form)
+        right = QVBoxLayout()
+        lrow = QHBoxLayout()
+        lrow.addWidget(b_new)
+        lrow.addWidget(b_del)
+        right.addLayout(lrow)
+        right.addWidget(self.tx_list)
+        right.addWidget(self.tx_editor, 1)
+        body = QHBoxLayout()
+        body.addWidget(self.tx_view, 3)
+        body.addLayout(right, 2)
+        b_back = QPushButton("←  Retour aux clips")
+        b_back.clicked.connect(lambda: (self.stack.setCurrentIndex(1), self._show_seg(self.seg)))
+        b_next = QPushButton("Étape 4 : shakes  →")
+        b_next.setObjectName("primary")
+        b_next.clicked.connect(lambda: (self.save_state(), self.start_shakes()))
+        row = QHBoxLayout()
+        row.addWidget(b_back)
+        row.addStretch(1)
+        row.addWidget(b_next)
+        lay = QVBoxLayout(w)
+        lay.addWidget(title)
+        lay.addWidget(info)
+        lay.addLayout(body, 1)
+        lay.addLayout(row)
+        self.tx_sel = -1
+        return w
+
+    def start_texts(self):
+        n = len(self.bounds) - 1
+        for sb in (self.tx_from, self.tx_to):
+            sb.blockSignals(True)
+            sb.setRange(1, max(1, n))
+            sb.blockSignals(False)
+        self.tx_list.blockSignals(True)
+        self.tx_list.clear()
+        for t in self.texts:
+            self.tx_list.addItem(t.get("texte") or "(vide)")
+        self.tx_list.blockSignals(False)
+        self.stack.setCurrentIndex(3)
+        if self.texts:
+            self.tx_list.setCurrentRow(0)
+            self._tx_pick(0)
+        else:
+            self.tx_sel = -1
+            self.tx_editor.setEnabled(False)
+            self._tx_base(self.seg)
+            self.tx_view.set_cfg(None)
+
+    def _tx_base(self, k):
+        k = max(0, min(len(self.bounds) - 2, k))
+        ch = self.choices[k] if k < len(self.choices) else None
+        if ch:
+            self.tx_view.show_at(ch[1], self._clip_start(ch[1]))
+        else:
+            self.tx_view.show_at(self.path, (self.bounds[k] + self.bounds[k + 1]) / 2)
+
+    def _tx_new(self):
+        from app.core import textfx
+        t = dict(textfx.DEFAULT, police=self.tx_font.currentFont().family(), debut=self.seg, fin=self.seg)
+        self.texts.append(t)
+        self.tx_list.addItem(t["texte"])
+        self.tx_list.setCurrentRow(len(self.texts) - 1)
+        self.save_state()
+
+    def _tx_del(self):
+        r = self.tx_list.currentRow()
+        if 0 <= r < len(self.texts):
+            del self.texts[r]
+            self.start_texts()
+            self.save_state()
+
+    def _tx_pick(self, r):
+        from PyQt6.QtGui import QFont
+        from app.core import textfx
+        if not 0 <= r < len(self.texts):
+            return
+        self.tx_sel = r
+        t = textfx.full(self.texts[r])
+        ws = (self.tx_text, self.tx_font, self.tx_size, self.tx_bold, self.tx_x, self.tx_y, self.tx_bev,
+              self.tx_bsize, self.tx_bforce, self.tx_fill, self.tx_mode, self.tx_from, self.tx_to)
+        for wd in ws:
+            wd.blockSignals(True)
+        self.tx_text.setText(t["texte"])
+        self.tx_font.setCurrentFont(QFont(t["police"]))
+        self.tx_size.setValue(int(t["taille"]))
+        self.tx_bold.setChecked(bool(t["gras"]))
+        self.tx_x.setValue(int(t["x"]))
+        self.tx_y.setValue(int(t["y"]))
+        self.tx_bev.setChecked(bool(t["biseau"]))
+        self.tx_bsize.setValue(int(t["biseau_taille"]))
+        self.tx_bforce.setValue(int(t["biseau_force"]))
+        self.tx_fill.setValue(int(t["remplissage"]))
+        self.tx_mode.setCurrentIndex(max(0, self.tx_mode.findData(t["mode"])))
+        self.tx_from.setValue(int(t["debut"]) + 1)
+        self.tx_to.setValue(int(t["fin"]) + 1)
+        for wd in ws:
+            wd.blockSignals(False)
+        self.tx_editor.setEnabled(True)
+        self.tx_color.setEnabled(t["mode"] == "normal")
+        self._tx_base(int(t["debut"]))
+        self.tx_view.set_cfg(t)
+
+    def _tx_edit(self, *_):
+        r = self.tx_sel
+        if not 0 <= r < len(self.texts):
+            return
+        a, b = self.tx_from.value() - 1, self.tx_to.value() - 1
+        old_start = int(self.texts[r].get("debut", 0))
+        t = dict(self.texts[r], texte=self.tx_text.text(), police=self.tx_font.currentFont().family(),
+                 taille=self.tx_size.value(), gras=self.tx_bold.isChecked(), x=self.tx_x.value(), y=self.tx_y.value(),
+                 biseau=self.tx_bev.isChecked(), biseau_taille=self.tx_bsize.value(),
+                 biseau_force=self.tx_bforce.value(), remplissage=self.tx_fill.value(),
+                 mode=self.tx_mode.currentData(), debut=min(a, b), fin=max(a, b))
+        self.texts[r] = t
+        it = self.tx_list.item(r)
+        if it is not None:
+            it.setText(t["texte"] or "(vide)")
+        self.tx_color.setEnabled(t["mode"] == "normal")
+        if t["debut"] != old_start:
+            self._tx_base(t["debut"])
+        self.tx_view.set_cfg(t)
+        self.save_state()
+
+    def _tx_color(self):
+        from PyQt6.QtGui import QColor
+        from PyQt6.QtWidgets import QColorDialog
+        r = self.tx_sel
+        if not 0 <= r < len(self.texts):
+            return
+        c = QColorDialog.getColor(QColor(self.texts[r].get("couleur", "#ffffff")), self, "Couleur du texte")
+        if c.isValid():
+            self.texts[r]["couleur"] = c.name()
+            self.tx_view.set_cfg(self.texts[r])
+            self.save_state()
+
+    # ------------------------------------------------------------ étape 4 : shakes
     def _page_shakes(self):
         w = QWidget()
-        self.sh_title = QLabel("3. Les shakes")
+        self.sh_title = QLabel("4. Les shakes")
         self.sh_title.setStyleSheet("font-size: 18px; font-weight: 700;")
-        info = QLabel("Un shake a été posé automatiquement sur chaque coupe (les losanges). Clique un losange pour "
-                      "le voir et changer sa puissance, ou décoche-le pour l'enlever. Espace : lire le clip.")
+        info = QLabel("Un shake a été posé automatiquement sur chaque coupe (les losanges, une couleur par réglage). "
+                      "Clique un losange pour le voir et changer sa puissance. Plusieurs d'un coup : glisse sur la "
+                      "barre, ou Ctrl + clic / Maj + clic. Espace : lire le clip.")
         info.setWordWrap(True)
         info.setObjectName("hint")
         self.sh_view = Preview()
         self.sh_bar = MarkerBar()
         self.sh_bar.picked.connect(self._sh_select)
+        self.sh_bar.selection.connect(self._sh_multi)
+        self.sh_legend = QLabel("")
+        self.sh_legend.setTextFormat(Qt.TextFormat.RichText)
         self.sh_on = QCheckBox("Shake sur cette coupe")
         self.sh_lvl = QComboBox()
         for sens in ("in", "out"):
             for n in range(1, 6):
                 self.sh_lvl.addItem(f"{sens.upper()} {n}x", (sens, n))
-        self.sh_dur = QSpinBox()
-        self.sh_dur.setRange(1, 9)
-        self.sh_dur.setPrefix("durée ")
+        self.sh_dur = DurCombo()
         for w_ in (self.sh_on,):
             w_.toggled.connect(self._sh_edit)
         self.sh_lvl.currentIndexChanged.connect(self._sh_edit)
@@ -1039,8 +1498,8 @@ class ReproduceDialog(QDialog):
         ctl.addWidget(self.sh_lvl)
         ctl.addWidget(self.sh_dur)
         ctl.addWidget(b_all)
-        b_back = QPushButton("←  Retour aux clips")
-        b_back.clicked.connect(lambda: (self.stack.setCurrentIndex(1), self._show_seg(self.seg)))
+        b_back = QPushButton("←  Retour aux textes")
+        b_back.clicked.connect(lambda: (self._save_shakes(force=True), self.start_texts()))
         b_view = QPushButton("👁  Voir le résultat à côté de l'edit")
         b_view.clicked.connect(lambda: (self._save_shakes(), self.apply_project(), self.show_final()))
         b_end = QPushButton("Terminer sans exporter")
@@ -1059,9 +1518,10 @@ class ReproduceDialog(QDialog):
         lay.addWidget(info)
         lay.addWidget(self.sh_view, 1)
         lay.addWidget(self.sh_bar)
+        lay.addWidget(self.sh_legend)
         lay.addLayout(ctl)
         lay.addLayout(row)
-        self.sh_cfg, self.sh_tl, self.sh_sel = [], [], 0
+        self.sh_cfg, self.sh_tl, self.sh_sel, self.sh_many = [], [], 0, [0]
         return w
 
     def start_shakes(self):
@@ -1086,7 +1546,8 @@ class ReproduceDialog(QDialog):
             cuts.append(t)
         self.sh_bar.set(t + self.sh_tl[-1]["duree"], cuts, self.sh_cfg)
         self.stack.setCurrentIndex(2)
-        self.sh_title.setText(f"3. Les shakes — {len(cuts)} coupe(s)")
+        self.sh_title.setText(f"4. Les shakes — {len(cuts)} coupe(s)")
+        self._sh_legend()
         self._sh_select(0)
 
     def _sh_select(self, i):
@@ -1094,6 +1555,7 @@ class ReproduceDialog(QDialog):
             return
         self.sh_sel = i = max(0, min(len(self.sh_cfg) - 1, i))
         self.sh_bar.select(i)
+        self.sh_many = sorted(self.sh_bar.chosen)
         c = self.sh_cfg[i]
         e = self.sh_tl[i + 1]
         for w_ in (self.sh_on, self.sh_lvl, self.sh_dur):
@@ -1110,28 +1572,47 @@ class ReproduceDialog(QDialog):
                              f"vers {vclip.name(e['clip'])}")
         self.sh_view.show_at(e["clip"], self._clip_start(e["clip"]))
 
+    def _sh_multi(self, idx):
+        self.sh_many = list(idx) or [self.sh_sel]
+        if len(self.sh_many) > 1:
+            self.sh_info.setText(f"{len(self.sh_many)} coupes choisies : les réglages s'appliquent à toutes")
+
+    def _sh_legend(self):
+        parts = []
+        for (sens, niv, dur), col in self.sh_bar.groups.items():
+            n = sum(1 for c in self.sh_cfg if group_key(c) == (sens, niv, dur))
+            parts.append(f"<span style='color:{col}; font-size:16px'>◆</span> {sens.upper()} {niv}x · durée {dur} "
+                         f"<span style='color:#888'>({n})</span>")
+        off = sum(1 for c in self.sh_cfg if c is None)
+        if off:
+            parts.append(f"<span style='color:#555a66; font-size:16px'>◆</span> sans shake ({off})")
+        self.sh_legend.setText("&nbsp;&nbsp;&nbsp;".join(parts))
+
     def _sh_edit(self, *_):
         if not self.sh_cfg:
             return
-        if self.sh_on.isChecked():
-            s, n = self.sh_lvl.currentData()
-            self.sh_cfg[self.sh_sel] = {"actif": True, "sens": s, "niveau": n, "duree": self.sh_dur.value()}
-        else:
-            self.sh_cfg[self.sh_sel] = None
+        for i in (self.sh_many if self.sh_sel in self.sh_many else [self.sh_sel]):
+            if self.sh_on.isChecked():
+                s, n = self.sh_lvl.currentData()
+                self.sh_cfg[i] = {"actif": True, "sens": s, "niveau": n, "duree": self.sh_dur.value()}
+            else:
+                self.sh_cfg[i] = None
         self.sh_lvl.setEnabled(self.sh_on.isChecked())
         self.sh_dur.setEnabled(self.sh_on.isChecked())
         self.sh_bar.set(self.sh_bar.total, self.sh_bar.cuts, self.sh_cfg)
-        self.sh_bar.select(self.sh_sel)
+        self.sh_bar.update()
+        self._sh_legend()
 
     def _sh_all(self):
         c = self.sh_cfg[self.sh_sel] if self.sh_cfg else None
         self.sh_cfg = [dict(c) if c else None for _ in self.sh_cfg]
         self.sh_bar.set(self.sh_bar.total, self.sh_bar.cuts, self.sh_cfg)
         self.sh_bar.select(self.sh_sel)
+        self._sh_legend()
 
-    def _save_shakes(self):
-        """Les réglages de l'étape 3 vont dans chaque plan (ils servent au rendu)."""
-        if not self.sh_cfg or self.stack.currentIndex() != 2:
+    def _save_shakes(self, force=False):
+        """Les réglages de l'étape 4 vont dans chaque plan (ils servent au rendu)."""
+        if not self.sh_cfg or (self.stack.currentIndex() != 2 and not force):
             return
         for e, c in zip(self.sh_tl[1:], self.sh_cfg):
             fx = dict(self.fx.get(e["plan"]) or {})
@@ -1187,7 +1668,21 @@ class ReproduceDialog(QDialog):
         start = float(rm["debut"]) if rm else float(s0 or 0.0)
         n = fx.get("multi")
         title = f"{n}K dismiss / flick away — time remap manuel" if n else "Time remap manuel"
-        dlg = ManualRemapDialog(ch[1], d, fx.get("manuel"), start, title, self)
+        data = fx.get("manuel")
+        if not data and n:                     # multi-kill : une keyframe par kill trouvé (bannières de kill)
+            try:
+                from PyQt6.QtWidgets import QApplication
+                QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+                kills = [k / tr.FPS for k in tr.find_kills(ch[1]) if k / tr.FPS > start - 0.05][:n]
+            except Exception:                  # noqa: BLE001
+                kills = []
+            finally:
+                QApplication.restoreOverrideCursor()
+            if kills:
+                keys = [[0.0, start]] + [[round(d * (i + 1) / (len(kills) + 1), 3), kt] for i, kt in enumerate(kills)]
+                keys.append([d, kills[-1] + 0.35])
+                data = {"keys": keys, "courbes": ["0.33, 0, 0.67, 1"] * (len(keys) - 1)}
+        dlg = ManualRemapDialog(ch[1], d, data, start, title, self)
         if dlg.exec() and dlg.result:
             fx["manuel"] = dlg.result
             self.fx[self.seg] = fx
@@ -1489,7 +1984,7 @@ class ReproduceDialog(QDialog):
         if self.seg < len(self.bounds) - 2:
             self._show_seg(self.seg + 1)
         else:
-            self.start_shakes()                         # étape 3 : les shakes, posés automatiquement
+            self.start_texts()                          # étape 3 : les textes, puis étape 4 : les shakes
 
     def build_timeline(self):
         """Un élément par plan, dans l'ordre (un même clip peut revenir plusieurs fois).
@@ -1536,6 +2031,10 @@ class ReproduceDialog(QDialog):
         self.project.plans = {c: plans[c] for c in clips if plans.get(c)}   # chaque clip dure son plan
         self.project.overlays = {self.choices[k][1]: ov for k, ov in self.overlays.items()
                                  if k < len(self.choices) and self.choices[k]}
+        n = len(self.bounds) - 1
+        self.project.texts = [dict(t, debut_s=round(self.bounds[min(n - 1, int(t.get("debut", 0)))], 4),
+                                   fin_s=round(self.bounds[min(n, int(t.get("fin", 0)) + 1)], 4))
+                              for t in self.texts if t.get("texte")]
         sh = dict(self.project.shakes or {})
         sh.pop("coupes", None)                     # les réglages de shake de ce plan-ci reprennent la main
         self.project.shakes = sh

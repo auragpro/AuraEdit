@@ -30,6 +30,21 @@ def _frames(path, fps=CLIP_FPS, file=False):
     return np.frombuffer(p.stdout[:n * SW * SH * 3], np.uint8).reshape(n, SH, SW, 3)
 
 
+HUD = "crop=iw*0.12:ih*0.13:iw*0.44:ih*0.86,scale=32:32,format=gray"     # icône d'arme au centre du HUD
+
+
+def _hud(path, fps=CLIP_FPS):
+    """Le centre du HUD en bas de l'image (là où l'icône du kunai s'affiche), image par image."""
+    p = subprocess.run([audio.ffmpeg_exe(), "-hide_banner", "-loglevel", "error", *vclip.input_args(path), "-an",
+                        "-vf", f"fps={fps},{HUD}", "-f", "rawvideo", "-"], capture_output=True,
+                       creationflags=audio._NO_WINDOW)
+    n = len(p.stdout) // 1024
+    a = np.frombuffer(p.stdout[:n * 1024], np.uint8).reshape(n, 1024).astype(np.float32)
+    a -= a.mean(axis=1, keepdims=True)
+    a /= np.linalg.norm(a, axis=1, keepdims=True) + 1e-6
+    return a
+
+
 def _hue_sat(img):
     f = img.astype(np.float32) / 255
     r, g, b = f[..., 0], f[..., 1], f[..., 2]
@@ -96,6 +111,18 @@ def analyse(edit, bounds, classes, remaps, progress=None, cancelled=None):
             f = _frames(c["image"], file=True)
             if len(f):
                 refs[key] += [desc(f[0])] * 2           # l'image de référence du couteau compte double
+    # icône du kunai au centre du HUD : apprise sur tes clips kunai, comparée aux autres clips
+    hud_k, hud_o = [], []
+    kunai_keys = [k for k, c in classes.items() if c["special"] and c["pool"].lower().startswith("kunai")]
+    try:
+        for key, c in classes.items():
+            for clip in c["clips"][:6]:
+                h = _hud(clip)
+                if len(h):
+                    pick = h[np.linspace(0, len(h) - 1, min(6, len(h))).astype(int)]
+                    (hud_k if key in kunai_keys else hud_o).extend(pick)
+    except Exception:                               # noqa: BLE001
+        hud_k, hud_o = [], []
     jobs = [(key, clip) for key, c in classes.items() for clip in c["clips"][:16]]     # plus d'exemples appris
     done = 0
     with ThreadPoolExecutor(6) as ex:
@@ -112,6 +139,12 @@ def analyse(edit, bounds, classes, remaps, progress=None, cancelled=None):
     if progress:
         progress(0.8, "Je regarde l'edit...")
     frames = _frames(edit, EDIT_FPS)
+    try:
+        ehud = _hud(edit, EDIT_FPS) if hud_k and hud_o else []
+    except Exception:                               # noqa: BLE001
+        ehud = []
+    HK = np.array(hud_k) if len(hud_k) else None
+    HO = np.array(hud_o) if len(hud_o) else None
     cat = {k: (c["pool"] if c["special"] else FLICK) for k, c in classes.items()}
     out = []
     for i in range(len(bounds) - 1):
@@ -138,6 +171,21 @@ def analyse(edit, bounds, classes, remaps, progress=None, cancelled=None):
         for key, v in form.items():                     # + la meilleure ressemblance moyenne (départage)
             cats[cat[key]] = cats.get(cat[key], 0.0) + 0.5 * max(0.0, v)
         best = max(cats, key=cats.get) if cats else None
+        # le kunai d'abord : l'icône du kunai est-elle au centre du HUD ?
+        if HK is not None and HO is not None and len(ehud) and kunai_keys:
+            hk, ho = [], []
+            for j in idx:
+                if j < len(ehud):
+                    hk.append(float((HK @ ehud[j]).max()))
+                    ho.append(float((HO @ ehud[j]).max()))
+            if hk:
+                kunai_seen = np.mean(hk) > np.mean(ho) + 0.03 and np.mean(hk) > 0.55
+                kcat = cat[kunai_keys[0]]
+                if kunai_seen:
+                    best = kcat                         # kunai vu : on garde le kunai (le bras se choisit après)
+                elif best == kcat:                      # pas de kunai : est-ce un dash ? sinon la catégorie suivante
+                    rest = {c: v for c, v in cats.items() if c != kcat}
+                    best = max(rest, key=rest.get) if rest else best
         inside = [k for k in classes if cat[k] == best]
         inside.sort(key=lambda k: -(kn[k] if best == FLICK else form[k]))
         others = sorted([k for k in classes if cat[k] != best], key=lambda k: -form[k])

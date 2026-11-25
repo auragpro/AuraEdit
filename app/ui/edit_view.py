@@ -81,6 +81,11 @@ class EditView(QWidget):
         item = self.sidebar.item(row)
         if item is not None and item.data(ROLE) is not None:
             self.pages.setCurrentIndex(item.data(ROLE))
+            try:                                       # petite transition en fondu
+                from .start_page import fade_in
+                fade_in([self.pages.currentWidget()], step=0)
+            except Exception:                          # noqa: BLE001
+                pass
             if self.pages.currentWidget() is self.tabs.get("Montage"):
                 self.tabs["Montage"].home()            # revient aux gros carrés
 

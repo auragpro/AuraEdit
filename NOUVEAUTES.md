@@ -1,3 +1,15 @@
+## Nouveautés de la version 1.5.0
+
+- **Accueil redessiné** : fond animé (lueurs qui bougent, grille, bandes), apparitions en fondu, chiffres (projets, clips, skins), cartes de fonctions. Transitions en fondu entre les onglets.
+- **Personnalisation (🎨 Thème)** : animations on/off, fond animé on/off, intensité de la lueur des boutons, arrondi des coins, image de fond de l'accueil.
+- **Lecture continue (espace)** : tes clips se lisent avec LEUR time remap, à la suite sur tous les plans (écran noir s'il n'y a pas de clip), synchronisés avec l'edit.
+- **Fondu sur ton clip** : tu choisis où le fondu commence sur les images de TON clip (avant son début).
+- **2K / 3K / 4K** : une keyframe par kill trouvé (bannières), bouton « ➕ Ajouter une keyframe entre 2 », clic dans le graphique.
+- **Étape 3 : textes** (avant les shakes) : police de ton PC, effet « Biseautage et estampage », mode de fusion « Incrustation » (texte transparent avec relief), taille, position, plans où il apparaît.
+- **Shakes** : une couleur par groupe de réglages (+ légende), plusieurs losanges d'un coup (glisser, Ctrl/Maj + clic), durée en liste.
+- **Edit auto** : regarde l'icône du kunai au centre du HUD ; kunai vu → kunai (puis quel bras), sinon il vérifie si c'est un dash.
+- **Moins de blocages** : les images des aperçus se chargent en arrière-plan.
+
 ## Nouveautés de la version 1.4.0
 
 - **Barre espace = lecture** (Reproduire) : les 2 vidéos (plan de l'edit + ton clip) se lisent tout de suite, en boucle, sans barre de chargement. Espace pour arrêter.

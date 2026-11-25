@@ -31,6 +31,8 @@ THEMES = {
 }
 DEFAULT_THEME = "AuraScript (noir & rouge)"
 KEYS = ("accent", "accent2", "bg", "panel", "panel2", "border", "text", "muted")
+# options de personnalisation (en plus des couleurs)
+OPTIONS = {"animations": True, "fond_anime": True, "lueur": 60, "fond_image": "", "arrondi": 100}
 
 
 def _theme_file():
@@ -53,6 +55,9 @@ def load_theme():
             t.update({k: d[k] for k in KEYS if isinstance(d.get(k), str) and d[k].startswith("#")})
             if d.get("nom") == "Personnalisé":
                 t["nom"] = "Personnalisé"
+            for k, v in OPTIONS.items():
+                if isinstance(d.get(k), type(v)):
+                    t[k] = d[k]
     except (OSError, ValueError):
         pass
     return t
@@ -73,6 +78,11 @@ def rgba(hex_color, a):
 
 
 THEME = load_theme()
+
+
+def option(key):
+    """Option de personnalisation (animations, fond animé, lueur, image de fond, arrondi)."""
+    return THEME.get(key, OPTIONS.get(key))
 RED = THEME["accent"]          # couleur d'accent (nom gardé pour le code existant)
 ACCENT2 = THEME["accent2"]
 DARK = THEME["bg"]
@@ -95,6 +105,7 @@ QWidget {{
     font-size: 14px;
 }}
 QLabel {{ background: transparent; }}
+QWidget#clear {{ background: transparent; }}
 QLabel#title {{ font-size: 46px; font-weight: 800; letter-spacing: 6px;
                color: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #ffffff, stop:0.5 {A2}, stop:1 {A}); }}
 QLabel#subtitle {{ color: {M}; font-size: 15px; }}
@@ -244,6 +255,21 @@ QSplitter::handle:hover {{ background: {A}; }}
 """
 
 
+def _round(css, k):
+    """Arrondi des coins réglable : multiplie tous les border-radius."""
+    import re
+    if abs(k - 1) < 0.01:
+        return css
+    return re.sub(r"border-radius: (\d+)px", lambda m: f"border-radius: {int(round(int(m[1]) * k))}px", css)
+
+
+_build = build
+
+
+def build(t):                                   # noqa: F811
+    return _round(_build(t), max(0, int(t.get("arrondi", 100))) / 100.0)
+
+
 STYLESHEET = build(THEME)
 
 
@@ -251,7 +277,9 @@ def apply_theme(t):
     """Change le thème tout de suite (et pour les prochains lancements)."""
     global STYLESHEET
     save_theme(t)
-    STYLESHEET = build(dict(THEMES[DEFAULT_THEME], **{k: t[k] for k in KEYS if k in t}))
+    THEME.update(t)
+    STYLESHEET = build(dict(THEMES[DEFAULT_THEME], **{k: t[k] for k in KEYS if k in t},
+                            arrondi=t.get("arrondi", 100)))
     from PyQt6.QtWidgets import QApplication
     app = QApplication.instance()
     if app is not None:
@@ -297,12 +325,13 @@ def install_glow(app):
                 eff.setOffset(0, 0)
                 b.setGraphicsEffect(eff)
             c = QColor(self.color)
+            k = max(0, min(100, int(option("lueur")))) / 60.0
             if main:
-                eff.setBlurRadius(40 if hover else 22)
-                c.setAlpha(220 if hover else 120)
+                eff.setBlurRadius((40 if hover else 22) * max(0.3, k))
+                c.setAlpha(min(255, int((220 if hover else 120) * k)))
             else:
-                eff.setBlurRadius(24)
-                c.setAlpha(140)
+                eff.setBlurRadius(24 * max(0.3, k))
+                c.setAlpha(min(255, int(140 * k)))
             eff.setColor(c)
 
     app._glow = Glow(app)

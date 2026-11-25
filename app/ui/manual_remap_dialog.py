@@ -135,6 +135,9 @@ class ManualRemapDialog(QDialog):
         b_add = QPushButton("➕ Keyframe ici")
         b_add.setObjectName("primary")
         b_add.clicked.connect(self._add)
+        b_mid = QPushButton("➕ Ajouter une keyframe entre 2")
+        b_mid.setToolTip("Ajoute une keyframe au milieu entre la keyframe choisie et la suivante.")
+        b_mid.clicked.connect(self._add_between)
         b_del = QPushButton("🗑 Supprimer la keyframe")
         b_del.clicked.connect(self._del)
 
@@ -174,6 +177,7 @@ class ManualRemapDialog(QDialog):
         right.addWidget(self.table, 1)
         crow = QHBoxLayout()
         crow.addWidget(self.preset, 1)
+        crow.addWidget(b_mid)
         crow.addWidget(b_del)
         right.addLayout(crow)
         right.addWidget(QLabel("Frame blending :"))
@@ -258,6 +262,20 @@ class ManualRemapDialog(QDialog):
         self.table.item(i, 1).setText(f"{int(round(keys[i][1] * tr.FPS))}")
         self.table.blockSignals(False)
         self._sync()
+
+    def _add_between(self):
+        keys, curves = self._keys()
+        r = max(0, self.table.currentRow())
+        r = min(r, len(keys) - 2)
+        (a0, s0), (a1, s1) = keys[r], keys[r + 1]
+        ts = tr.manual_times(keys, curves, self.total)
+        a = (a0 + a1) / 2
+        b = ts[min(len(ts) - 1, int(round(a * tr.FPS)))]
+        keys.insert(r + 1, [round(a, 3), round(b * tr.FPS) / tr.FPS])
+        allc = curves + [""]
+        allc.insert(r + 1, allc[r] or PRESETS[0][1])
+        self._fill(keys, allc)
+        self.table.selectRow(r + 1)
 
     def _del(self):
         r = self.table.currentRow()
