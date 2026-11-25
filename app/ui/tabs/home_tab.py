@@ -122,6 +122,16 @@ class HomeTab(QWidget):
             return
         if not out.lower().endswith(".mp4"):
             out += ".mp4"
+        try:                                       # shakes posés automatiquement : on confirme coupe par coupe
+            from app.core import shake
+            from ..shake_cuts_dialog import ShakeCutsDialog, cut_rows
+            rows, over = cut_rows(self.project)
+            if any(c is not None for c in shake.cut_cfgs(self.project.shakes, len(rows), over)):
+                if not ShakeCutsDialog(self.project, self, confirm=True).exec():
+                    return
+                self.changed.emit()
+        except Exception:                          # noqa: BLE001
+            pass
         self.thread = RenderThread(self.project, out, self, export=dict(self.ecfg))
         self.thread.progress.connect(self._progress)
         self.thread.done.connect(self._done)

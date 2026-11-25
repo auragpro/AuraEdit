@@ -9,7 +9,7 @@ from PyQt6.QtCore import QSize, Qt, QThread, QTimer, pyqtSignal
 from PyQt6.QtGui import QIcon, QPixmap
 from PyQt6.QtWidgets import (QDialog, QFileDialog, QHBoxLayout, QInputDialog, QLabel, QListWidget,
                              QListWidgetItem, QMenu, QMessageBox, QPushButton, QSizePolicy, QSlider,
-                             QSplitter, QStackedWidget, QVBoxLayout, QWidget)
+                             QSplitter, QStackedWidget, QVBoxLayout, QWidget, QComboBox, QSpinBox)
 
 from app.core import vclip
 from app.core import project as proj
@@ -181,6 +181,7 @@ class ReproduceDialog(QDialog):
         self.cuts = []
         self.choices = []                 # par plan : (catégorie, chemin) ou None
         self.overlays = {}                # par plan : réglages de la vidéo superposée (fond vert)
+        self.fx = {}                      # par plan : {"fondu": ms, "shake": None / {"off"} / réglage}
         self.seg = 0
         self.thread = None
         self.stack = QStackedWidget()
@@ -285,7 +286,8 @@ class ReproduceDialog(QDialog):
         d = load_saved()
         d[self.path] = {"cuts": [round(c, 4) for c in sorted(self.cuts)], "length": self.length, "fps": self.fps,
                         "choices": [list(c) if c else None for c in self.choices],
-                        "overlays": {str(k): v for k, v in self.overlays.items()}, "date": time.time()}
+                        "overlays": {str(k): v for k, v in self.overlays.items()},
+                        "fx": {str(k): v for k, v in self.fx.items()}, "date": time.time()}
         write_saved(d)
 
     def load_edit(self, path):
@@ -300,6 +302,7 @@ class ReproduceDialog(QDialog):
         self.cuts = [float(c) for c in e.get("cuts", [])]
         self.choices = [tuple(c) if c else None for c in e.get("choices", [])]
         self.overlays = {int(k): v for k, v in (e.get("overlays") or {}).items()}
+        self.fx = {int(k): v for k, v in (e.get("fx") or {}).items() if isinstance(v, dict)}
         self.slider.setRange(0, max(1, int(self.length * self.fps) - 1))
         self.slider.setEnabled(True)
         self._fill_cuts()
@@ -326,7 +329,7 @@ class ReproduceDialog(QDialog):
             self.load_edit(f)                     # déjà découpé : on reprend là où on en était
             return
         self.path = f
-        self.choices, self.overlays = [], {}
+        self.choices, self.overlays, self.fx = [], {}, {}
         self.cut_status.setText("Je cherche les transitions...")
         self.thread = CutsThread(f, self)
         self.thread.done.connect(self._cuts_found)
@@ -436,6 +439,32 @@ class ReproduceDialog(QDialog):
                                    "« Mes clips » et dans la partie Dash / Kunai.")
         self.b_addclips.clicked.connect(self.add_clips)
         self.b_go.clicked.connect(self._next_seg)
+        # effets à l'entrée de ce plan (sur la coupe juste avant) : fondu d'opacité + shake de cette coupe
+        self.fx_fade = QSpinBox()
+        self.fx_fade.setRange(0, 1500)
+        self.fx_fade.setSingleStep(20)
+        self.fx_fade.setPrefix("Fondu : ")
+        self.fx_fade.setSuffix(" ms")
+        self.fx_fade.setSpecialValueText("Fondu : aucun")
+        self.fx_fade.setToolTip("Le clip de ce plan commence quelques millisecondes plus tôt et apparaît "
+                                "de 0 à 100 % d'opacité par-dessus le clip d'avant.")
+        self.fx_shake = QComboBox()
+        self.fx_shake.addItem("Shake : réglage global", None)
+        self.fx_shake.addItem("Shake : aucun", "off")
+        for sens in ("in", "out"):
+            for n in range(1, 6):
+                self.fx_shake.addItem(f"Shake {sens.upper()} {n}x", (sens, n))
+        self.fx_dur = QSpinBox()
+        self.fx_dur.setRange(1, 9)
+        self.fx_dur.setValue(5)
+        self.fx_dur.setPrefix("durée ")
+        for w_ in (self.fx_fade, self.fx_dur):
+            w_.valueChanged.connect(self._fx_changed)
+        self.fx_shake.currentIndexChanged.connect(self._fx_changed)
+        self.b_cmp = QPushButton("🆚  Comparer avec l'edit")
+        self.b_cmp.setToolTip("Aperçu rapide : l'edit d'exemple à gauche, tes clips choisis à droite (sans ralentis), "
+                              "avec le son de l'edit.")
+        self.b_cmp.clicked.connect(self.compare)
         self.b_full = QPushButton("⛶  Plein écran")
         self.b_full.setObjectName("pill")
         self.b_full.clicked.connect(self._fullscreen)
@@ -459,6 +488,13 @@ class ReproduceDialog(QDialog):
         brow.addWidget(self.b_remap)
         brow.addWidget(self.b_over)
         lv.addLayout(brow)
+        lv.addWidget(kick("ENTRÉE DE CE PLAN (LA COUPE JUSTE AVANT)"))
+        frow = QHBoxLayout()
+        frow.addWidget(self.fx_fade)
+        frow.addWidget(self.fx_shake)
+        frow.addWidget(self.fx_dur)
+        frow.addStretch(1)
+        lv.addLayout(frow)
         lv.addWidget(kick("TIMELINE DE TES CLIPS — CLIQUE UNE IMAGE POUR ALLER AU PLAN"))
         lv.addWidget(self.tl)
         # à droite : la liste des couteaux, dash, kunai... qu'on fait défiler
@@ -486,6 +522,7 @@ class ReproduceDialog(QDialog):
         trow.addWidget(self.auto_status)
         trow.addWidget(self.b_addclips)
         trow.addWidget(self.b_auto)
+        trow.addWidget(self.b_cmp)
         trow.addWidget(self.b_full)
         lay.addLayout(trow)
         lay.addWidget(info)
@@ -667,7 +704,119 @@ class ReproduceDialog(QDialog):
         if self.tl.count() == n:
             self.tl.setCurrentRow(i)
             self.tl.scrollToItem(self.tl.item(i))
+        self._show_fx()
         self._show_pick()
+
+    def _show_fx(self):
+        fx = self.fx.get(self.seg) or {}
+        sh = fx.get("shake")
+        for w_ in (self.fx_fade, self.fx_shake, self.fx_dur):
+            w_.blockSignals(True)
+        self.fx_fade.setValue(int(fx.get("fondu") or 0))
+        if sh is None:
+            self.fx_shake.setCurrentIndex(0)
+        elif sh.get("off"):
+            self.fx_shake.setCurrentIndex(1)
+        else:
+            idx = self.fx_shake.findData((sh.get("sens", "out"), int(sh.get("niveau", 3))))
+            self.fx_shake.setCurrentIndex(max(0, idx))
+            self.fx_dur.setValue(int(sh.get("duree", 5)))
+        self.fx_dur.setEnabled(self.fx_shake.currentIndex() > 1)
+        for w_ in (self.fx_fade, self.fx_shake, self.fx_dur):
+            w_.blockSignals(False)
+            w_.setEnabled(self.seg > 0 and (w_ is not self.fx_dur or self.fx_shake.currentIndex() > 1))
+
+    def _fx_changed(self, *_):
+        data = self.fx_shake.currentData()
+        if data is None:
+            sh = None
+        elif data == "off":
+            sh = {"off": True}
+        else:
+            sh = {"sens": data[0], "niveau": data[1], "duree": self.fx_dur.value()}
+        self.fx_dur.setEnabled(self.fx_shake.currentIndex() > 1)
+        fx = {"fondu": self.fx_fade.value(), "shake": sh}
+        if not fx["fondu"] and sh is None:
+            self.fx.pop(self.seg, None)
+        else:
+            self.fx[self.seg] = fx
+        self.save_state()
+
+    # ------------------------------------------------------------ comparaison
+    def _job(self, title, fn):
+        """Lance fn(progress) en arrière-plan avec une fenêtre de progression. Renvoie {"ok": ...} ou {"err": ...}."""
+        from PyQt6.QtCore import QEventLoop
+        from PyQt6.QtWidgets import QProgressDialog
+        from .workers import FuncThread
+        dlg = QProgressDialog(title, "Annuler", 0, 1000, self)
+        dlg.setWindowTitle(title)
+        dlg.setMinimumDuration(0)
+        dlg.setWindowModality(Qt.WindowModality.WindowModal)
+        dlg.setAutoClose(False)
+        dlg.setAutoReset(False)
+        self._cancel_job = False
+        dlg.canceled.connect(lambda: setattr(self, "_cancel_job", True))
+        th = FuncThread(fn, self)
+        res = {}
+        loop = QEventLoop()
+        th.progress.connect(lambda txt, f: (dlg.setLabelText(txt), dlg.setValue(int(max(0, min(1, f)) * 1000))))
+        th.done.connect(lambda r: (res.setdefault("ok", r), loop.quit()))
+        th.failed.connect(lambda m: (res.setdefault("err", m), loop.quit()))
+        th.start()
+        dlg.show()
+        loop.exec()
+        th.wait()
+        dlg.close()
+        if self._cancel_job:
+            res = {"annule": True}
+        return res
+
+    def _show_result(self, res, what):
+        from app.core import compare
+        if "ok" in res:
+            try:
+                compare.open_file(res["ok"])
+            except OSError:
+                QMessageBox.information(self, what, f"Vidéo prête :\n{res['ok']}")
+        elif "err" in res:
+            QMessageBox.warning(self, what, f"Impossible de faire la vidéo :\n{res['err'][-800:]}")
+
+    def compare(self):
+        """Aperçu rapide de ce que j'ai mis pour l'instant, à côté de l'edit de base."""
+        if not self.path or not getattr(self, "bounds", None):
+            return
+        from app.core import compare
+        plans = []
+        for k in range(len(self.bounds) - 1):
+            d = self.bounds[k + 1] - self.bounds[k]
+            ch = self.choices[k] if k < len(self.choices) else None
+            if ch:
+                rm = tr.clip_remaps().get(ch[1])
+                s0 = tr.clip_starts().get(str(ch[1]))
+                plans.append((ch[1], float(rm["debut"]) if rm else float(s0 or 0.0), d))
+            else:
+                plans.append((None, 0.0, d))
+        d = proj.config_dir() / "apercus"
+        d.mkdir(parents=True, exist_ok=True)
+        out = d / "comparaison_rapide.mp4"
+        res = self._job("Comparer avec l'edit", lambda p: compare.quick_preview(
+            self.path, plans, out, p, lambda: self._cancel_job))
+        self._show_result(res, "Comparer avec l'edit")
+
+    def show_final(self):
+        """Vrai rendu du montage (ralentis, shakes, fondus...) puis vidéo côte à côte avec l'edit d'exemple."""
+        from app.core import compare
+        from app.core import render as rnd
+        d = proj.config_dir() / "apercus"
+        d.mkdir(parents=True, exist_ok=True)
+        result, out = d / "resultat.mp4", d / "resultat_vs_edit.mp4"
+
+        def fn(p):
+            rnd.render(self.project, str(result), progress=lambda f, txt: p(txt, f * 0.92),
+                       is_cancelled=lambda: self._cancel_job)
+            p("Comparaison avec l'edit d'exemple...", 0.95)
+            return compare.side_by_side(self.path, result, out, lambda: self._cancel_job)
+        self._show_result(self._job("Résultat à côté de l'edit", fn), "Résultat")
 
     def _show_pick(self):
         ch = self.choices[self.seg]
@@ -851,6 +1000,11 @@ class ReproduceDialog(QDialog):
                 e = {"clip": ch[1], "duree": round(d + lead, 4), "plan": k}
                 if k in self.overlays:
                     e["overlay"] = self.overlays[k]
+                fx = self.fx.get(k) or {}
+                if fx.get("fondu"):
+                    e["fondu"] = int(fx["fondu"])
+                if fx.get("shake") is not None:
+                    e["shake"] = fx["shake"]
                 timeline.append(e)
                 lead = 0.0
             elif timeline:
@@ -875,8 +1029,20 @@ class ReproduceDialog(QDialog):
         self.project.plans = {c: plans[c] for c in clips if plans.get(c)}   # chaque clip dure son plan
         self.project.overlays = {self.choices[k][1]: ov for k, ov in self.overlays.items()
                                  if k < len(self.choices) and self.choices[k]}
+        sh = dict(self.project.shakes or {})
+        sh.pop("coupes", None)                     # les réglages de shake de ce plan-ci reprennent la main
+        self.project.shakes = sh
         self._keep_music()
         self.save_state()
+        try:
+            self.project.save()
+        except (OSError, ValueError):
+            pass
+        ask = QMessageBox.question(self, "Terminé ✓",
+                                   "Ton montage est prêt.\n\nVeux-tu voir le résultat à côté de l'edit d'exemple ? "
+                                   "(je fais le vrai rendu : ralentis, shakes, fondus… ça peut prendre quelques minutes)")
+        if ask == QMessageBox.StandardButton.Yes:
+            self.show_final()
         self.accept()
 
     def _keep_music(self):

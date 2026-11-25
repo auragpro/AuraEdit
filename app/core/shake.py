@@ -76,16 +76,48 @@ def _sample(frames, fps, s):
     return [p + (q - p) * u for p, q in zip(a, b)]
 
 
+def cut_cfgs(shakes, n_cuts, tl_over=None):
+    """Réglage du shake de chaque coupe : None (pas de shake) ou un réglage complet.
+    Ordre de priorité : choix coupe par coupe (confirmation) > choix fait dans Reproduire > réglage global."""
+    base = clean(shakes)
+    coupes = (shakes or {}).get("coupes") if isinstance(shakes, dict) else None
+    coupes = coupes if isinstance(coupes, dict) else {}
+    res = []
+    for k in range(n_cuts):
+        o = coupes.get(str(k))
+        if o is None and tl_over and k < len(tl_over):
+            o = tl_over[k]
+        if not isinstance(o, dict):
+            res.append(base if base["actif"] else None)
+        elif o.get("off"):
+            res.append(None)
+        else:
+            res.append(clean(dict(base, **{x: o[x] for x in ("sens", "niveau", "duree") if x in o}, actif=True)))
+    return res
+
+
+def _pairs(cuts, cfg):
+    out = []
+    for c in cuts:
+        if isinstance(c, (tuple, list)):
+            if c[1] is not None:
+                out.append((float(c[0]), clean(c[1])))
+        else:
+            out.append((float(c), cfg))
+    return out
+
+
 def frame_params(t, cuts, cfg):
     """Matrice 3x3 (sortie = M·entrée) et décalage rouge-bleu à l'instant t. Chaque coupe = PEAK ;
-    les shakes qui se chevauchent se combinent."""
+    les shakes qui se chevauchent se combinent. cuts : instants, ou (instant, réglage de cette coupe)."""
     D = data()
-    frames = D["presets"][f"{cfg['niveau']}x_{'In' if cfg['sens'] == 'in' else 'Out'}"]
-    k = DURATIONS[cfg["duree"] - 1]
     M = np.eye(3)
     rb = np.zeros(2)
-    lo, hi = -BEFORE / FPS_REF * k, AFTER / FPS_REF * k
-    for c in cuts:
+    for c, ccfg in (cuts if cuts and isinstance(cuts[0], tuple) and len(cuts[0]) == 2
+                    and isinstance(cuts[0][1], dict) else _pairs(cuts, cfg)):
+        frames = D["presets"][f"{ccfg['niveau']}x_{'In' if ccfg['sens'] == 'in' else 'Out'}"]
+        k = DURATIONS[ccfg["duree"] - 1]
+        lo, hi = -BEFORE / FPS_REF * k, AFTER / FPS_REF * k
         dt = t - c
         if dt <= lo or dt >= hi:
             continue
@@ -140,12 +172,15 @@ class _Warper:
 
 
 def active(cfg, cuts):
+    if cuts and isinstance(cuts[0], (tuple, list)):
+        return any(c[1] is not None for c in cuts)
     return clean(cfg)["actif"] and bool(cuts)
 
 
 def apply(src, output, cuts, cfg, w, h, fps, total, is_cancelled=None, progress=None):
     """Repasse sur la vidéo src (sans son) et pose les shakes autour de chaque coupe."""
     cfg = clean(cfg)
+    cuts = _pairs(cuts, cfg)                       # chaque coupe avec son propre réglage
     ff = audio.ffmpeg_exe()
     size = w * h * 3
     dec = subprocess.Popen([ff, "-hide_banner", "-loglevel", "error", "-i", str(src), "-f", "rawvideo",

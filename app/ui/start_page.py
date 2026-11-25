@@ -13,9 +13,9 @@ from version import __version__
 from .style import RED, asset
 
 WHATS_NEW = [
-    "Nouveau design + thèmes au choix (🎨 Thème en haut)",
-    "Reproduire dans son propre onglet, vidéos à gauche",
-    "Plus de barres noires : bords en miroir"]
+    "Fondus d'opacité et shakes coupe par coupe",
+    "Confirmation des shakes avant le rendu",
+    "Reproduire : comparer avec l'edit + voir le résultat"]
 
 
 def ago(ts):

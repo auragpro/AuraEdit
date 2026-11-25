@@ -94,6 +94,11 @@ class ShakeTab(QWidget):
         lay.addWidget(page_header("Shake", "Le shake Hit Impulse entre chaque clip."))
         lay.addWidget(self.enable)
         lay.addWidget(card)
+        b_cuts = QPushButton("🎯  Choisir les shakes coupe par coupe...")
+        b_cuts.setToolTip("Un réglage différent à chaque coupe (ex. OUT 3x durée 5 ici, IN 1x durée 4 là), "
+                          "ou pas de shake du tout sur certaines coupes.")
+        b_cuts.clicked.connect(self._per_cut)
+        lay.addWidget(b_cuts, alignment=Qt.AlignmentFlag.AlignLeft)
         lay.addWidget(hint)
         lay.addStretch(1)
         self.card = card
@@ -110,9 +115,15 @@ class ShakeTab(QWidget):
         gid = self.group.checkedId()
         self.cfg = shake.clean({"actif": self.enable.isChecked(), "sens": "out" if gid > 10 else "in",
                                 "niveau": gid % 10, "duree": self.dur.checkedId()})
-        self.project.shakes = dict(self.cfg)
+        old = self.project.shakes if isinstance(self.project.shakes, dict) else {}
+        self.project.shakes = dict(self.cfg, **({"coupes": old["coupes"]} if old.get("coupes") else {}))
         self._refresh()
         self.changed.emit()
+
+    def _per_cut(self):
+        from ..shake_cuts_dialog import ShakeCutsDialog
+        if ShakeCutsDialog(self.project, self).exec():
+            self.changed.emit()
 
     def summary(self):
         c = shake.clean(self.project.shakes)

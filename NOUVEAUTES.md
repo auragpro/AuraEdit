@@ -1,3 +1,11 @@
+## Nouveautés de la version 1.2.0
+
+- **Fondu d'opacité à l'endroit que tu veux** (Reproduire, étape 2, « Entrée de ce plan ») : le clip d'après s'allonge de quelques millisecondes et apparaît de 0 à 100 % d'opacité par-dessus le précédent.
+- **Shakes coupe par coupe** : sur chaque plan tu choisis le shake de la coupe (réglage global, aucun, IN/OUT 1x–5x + durée 1–9). Aussi dans Montage → Shake → « Choisir les shakes coupe par coupe ».
+- **Confirmation des shakes** : au moment de générer l'edit, la liste des shakes posés automatiquement s'affiche ; décoche ceux à retirer ou change leur réglage.
+- **🆚 Comparer avec l'edit** (Reproduire) : aperçu rapide côte à côte, l'edit d'exemple à gauche et tes clips à droite, avec le son.
+- **Terminer** propose de voir le vrai résultat (ralentis, shakes, fondus) à côté de l'edit d'exemple.
+
 ## Nouveautés de la version 1.1.0
 
 - **Nouveau design complet** façon tableau de bord : fond bleu nuit, panneaux arrondis, dégradés, halos lumineux, menu de gauche avec icônes, petits titres en majuscules.

@@ -130,6 +130,13 @@ def render(project, output, progress=None, is_cancelled=None, export=None):
                 with lock:
                     progress(min(0.97, done[0] / steps), txt)
 
+        def fade_of(i):
+            """Durée du fondu (s) à l'entrée du segment i (0 = coupe sèche)."""
+            e = seg_tl[i]
+            if i == 0 or not e:
+                return 0.0
+            return max(0.0, min(2.0, float(e.get("fondu") or 0) / 1000.0))
+
         def prep(i, kind, path):
             """Prépare un plan (encodage en .mp4). Renvoie (fichier, durée, time_remap)."""
             part = tmp / f"{i:04d}.mp4"
@@ -154,19 +161,32 @@ def render(project, output, progress=None, is_cancelled=None, export=None):
                     raise Cancelled()
                 except (ValueError, KeyError, OSError) as e:
                     raise RenderError(f"Time remap impossible pour {vclip.name(path)} :\n{e}")
-                return part, duration(part), True
+                X = fade_of(i)
+                if X > 0:                                        # fondu : le clip commence X s plus tôt
+                    pre = tmp / f"{i:04d}_f.mp4"
+                    _run([ff, "-y", "-hide_banner", "-i", str(part), "-an", "-vf",
+                          f"tpad=start_mode=clone:start_duration={X:.4f}", "-c:v", "libx264", "-preset",
+                          "veryfast", "-crf", "10", "-threads", "4", str(pre)], is_cancelled)
+                    part = pre
+                return part, duration(part) - X, True
             ss = None
             if kind == "clip":                                   # début choisi (clip sans time remap)
                 from . import timeremap as _tr
                 ss = _tr.clip_starts().get(str(path))
             cut = []
             vfx = vf_for(path)
+            X = fade_of(i)
+            if X > 0:                                            # fondu : le clip s'allonge de X s au début
+                before = min(X, ss or 0.0)
+                ss = (ss or 0.0) - before
+                if X - before > 0.001:
+                    vfx += f",tpad=start_mode=clone:start_duration={X - before:.4f}"
             if plan:                                             # coupé pile au clip suivant
-                vfx += f",tpad=stop_mode=clone:stop_duration={plan:.3f}"
-                cut = ["-t", f"{plan:.4f}"]
+                vfx += f",tpad=stop_mode=clone:stop_duration={plan + X:.3f}"
+                cut = ["-t", f"{plan + X:.4f}"]
             _run([ff, "-y", "-hide_banner", *vclip.input_args(path, ss=ss), "-an", "-vf", vfx, *cut,
                   "-c:v", "libx264", "-preset", "veryfast", "-crf", "10", "-threads", "4", str(part)], is_cancelled)
-            return part, duration(part), False
+            return part, duration(part) - X, False
 
         def job(i, kind, path):
             r = prep(i, kind, path)
@@ -198,6 +218,38 @@ def render(project, output, progress=None, is_cancelled=None, export=None):
             info.append(item)
             parts.append(part)
             t += d
+        # fondus d'opacité : le clip d'après apparaît de 0 à 100 % par-dessus le précédent
+        fades = [fade_of(i) for i in range(len(parts))]
+        if any(fades):
+            if progress:
+                progress(len(segs) / steps, "Fondus...")
+            merged, i = [], 0
+            while i < len(parts):
+                grp = [i]
+                j = i + 1
+                while j < len(parts) and fades[j] > 0:
+                    grp.append(j)
+                    j += 1
+                if len(grp) == 1:
+                    merged.append(parts[i])
+                else:
+                    out = tmp / f"fondu_{i:04d}.mp4"
+                    cmd = [ff, "-y", "-hide_banner"]
+                    for g in grp:
+                        cmd += ["-i", str(parts[g])]
+                    fl = [f"[{n}]settb=AVTB,fps={FPS},format=yuv420p[a{n}]" for n in range(len(grp))]
+                    acc, last = info[grp[0]]["duree"], "a0"
+                    for n, g in enumerate(grp[1:], 1):
+                        X = fades[g]
+                        fl.append(f"[{last}][a{n}]xfade=transition=fade:duration={X:.4f}:offset={max(0.0, acc - X):.4f}[v{n}]")
+                        acc += info[g]["duree"]
+                        last = f"v{n}"
+                    cmd += ["-filter_complex", ";".join(fl), "-map", f"[{last}]", "-c:v", "libx264", "-preset",
+                            "veryfast", "-crf", "10", str(out)]
+                    _run(cmd, is_cancelled)
+                    merged.append(out)
+                i = j
+            parts = merged
         lst = tmp / "liste.txt"
         lst.write_text("".join(f"file '{p.as_posix()}'\n" for p in parts), encoding="utf-8")
         if progress:
@@ -206,13 +258,15 @@ def render(project, output, progress=None, is_cancelled=None, export=None):
         video = lst
         from . import shake
         scfg = getattr(project, "shakes", None)
-        if shake.active(scfg, cuts):
+        tl_over = [(seg_tl[k + 1] or {}).get("shake") for k in range(len(cuts))]
+        shake_cuts = list(zip(cuts, shake.cut_cfgs(scfg, len(cuts), tl_over)))   # chaque coupe : son shake
+        if shake.active(scfg, shake_cuts):
             base = tmp / "base.mp4"
             _run([ff, "-y", "-hide_banner", "-f", "concat", "-safe", "0", "-i", str(lst), "-c:v", "copy",
                   str(base)], is_cancelled)
             video = tmp / "shake.mp4"
             try:
-                shake.apply(base, video, cuts, scfg, W, H, FPS, int(t * FPS) + 1, is_cancelled,
+                shake.apply(base, video, shake_cuts, scfg, W, H, FPS, int(t * FPS) + 1, is_cancelled,
                             (lambda f, txt: progress((len(segs) + f * 0.9) / steps, txt)) if progress else None)
             except InterruptedError:
                 raise Cancelled()
