@@ -9,7 +9,7 @@ from PyQt6.QtCore import QSize, Qt, QThread, QTimer, pyqtSignal
 from PyQt6.QtGui import QIcon, QPixmap
 from PyQt6.QtWidgets import (QDialog, QFileDialog, QHBoxLayout, QInputDialog, QLabel, QListWidget,
                              QListWidgetItem, QMenu, QMessageBox, QPushButton, QSizePolicy, QSlider,
-                             QSplitter, QStackedWidget, QVBoxLayout, QWidget, QComboBox, QSpinBox)
+                             QSplitter, QStackedWidget, QVBoxLayout, QWidget, QComboBox, QSpinBox, QCheckBox)
 
 from app.core import vclip
 from app.core import project as proj
@@ -146,6 +146,7 @@ class Preview(QLabel):
         self.timer.timeout.connect(self._load)
 
     def show_at(self, path, t):
+        self.stop()
         self.path, self.t = path, t
         self.timer.start(60)
 
@@ -170,6 +171,119 @@ class Preview(QLabel):
         super().resizeEvent(e)
         self._fit()
 
+    # ---------------------------------------------------------------- lecture (barre espace)
+    PW, PH, PFPS = 480, 270, 30
+
+    def play(self, path, start, dur):
+        """Joue le passage tout de suite : les images arrivent au fil du décodage (pas d'attente)."""
+        import subprocess
+        import threading
+        from app.core import audio
+        self.stop()
+        self._frames, self._i, self._alive, self._decoding = [], 0, True, True
+        self._gen = gen = getattr(self, "_gen", 0) + 1
+        if getattr(self, "_ptimer", None) is None:
+            self._ptimer = QTimer(self)
+            self._ptimer.timeout.connect(self._tick)
+        size = self.PW * self.PH * 3
+        cmd = [audio.ffmpeg_exe(), "-hide_banner", "-loglevel", "error",
+               *vclip.input_args(path, ss=max(0.0, start)), "-t", f"{max(0.05, dur):.3f}", "-an", "-vf",
+               f"fps={self.PFPS},scale={self.PW}:{self.PH}:force_original_aspect_ratio=decrease,"
+               f"pad={self.PW}:{self.PH}:(ow-iw)/2:(oh-ih)/2,format=rgb24", "-f", "rawvideo", "-"]
+
+        def run(frames=self._frames):
+            try:
+                p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                                     stdin=subprocess.DEVNULL, creationflags=audio._NO_WINDOW)
+                self._proc = p
+                while self._alive:
+                    buf = p.stdout.read(size)
+                    if len(buf) < size:
+                        break
+                    frames.append(buf)
+                p.kill()
+            except OSError:
+                pass
+            if self._gen == gen:
+                self._decoding = False
+        threading.Thread(target=run, daemon=True).start()
+        self._ptimer.start(int(1000 / self.PFPS))
+
+    def stop(self):
+        self._alive = False
+        self._decoding = False
+        if getattr(self, "_ptimer", None):
+            self._ptimer.stop()
+
+    def playing(self):
+        return bool(getattr(self, "_ptimer", None) and self._ptimer.isActive())
+
+    def _tick(self):
+        from PyQt6.QtGui import QImage
+        fr = self._frames
+        if not fr:
+            return
+        if self._i >= len(fr):
+            if self._decoding:                     # la suite arrive : on attend
+                return
+            self._i = 0                            # en boucle
+        img = QImage(fr[self._i], self.PW, self.PH, self.PW * 3, QImage.Format.Format_RGB888)
+        self.setPixmap(QPixmap.fromImage(img).scaled(self.size(), Qt.AspectRatioMode.KeepAspectRatio,
+                                                     Qt.TransformationMode.SmoothTransformation))
+        self._i += 1
+
+
+class MarkerBar(QWidget):
+    """Barre de temps du montage : un losange par coupe (shake). Plus gros = shake plus fort, gris = pas de shake."""
+    picked = pyqtSignal(int)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setMinimumHeight(70)
+        self.total, self.cuts, self.cfgs, self.sel = 1.0, [], [], 0
+
+    def set(self, total, cuts, cfgs):
+        self.total, self.cuts, self.cfgs = max(0.01, total), list(cuts), list(cfgs)
+        self.update()
+
+    def select(self, i):
+        self.sel = i
+        self.update()
+
+    def _x(self, t):
+        return 12 + (self.width() - 24) * t / self.total
+
+    def mousePressEvent(self, e):
+        if self.cuts:
+            x = e.position().x()
+            self.picked.emit(min(range(len(self.cuts)), key=lambda i: abs(self._x(self.cuts[i]) - x)))
+
+    def paintEvent(self, e):
+        from PyQt6.QtCore import QPointF
+        from PyQt6.QtGui import QColor, QPainter, QPolygonF
+        from .style import BORDER, PANEL_2, RED as ACC
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        mid = self.height() / 2
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QColor(PANEL_2))
+        p.drawRoundedRect(8, int(mid - 8), self.width() - 16, 16, 8, 8)
+        p.setBrush(QColor(BORDER))
+        for c in self.cuts:
+            p.drawRect(int(self._x(c)) - 1, int(mid - 8), 2, 16)
+        for i, c in enumerate(self.cuts):
+            cfg = self.cfgs[i] if i < len(self.cfgs) else None
+            r = 5 + (cfg["niveau"] * 2 if cfg else 0)
+            x = self._x(c)
+            col = QColor(ACC) if cfg else QColor("#555a66")
+            if i == self.sel:
+                p.setBrush(QColor("#ffffff"))
+                p.drawPolygon(QPolygonF([QPointF(x, mid - r - 4), QPointF(x + r + 4, mid), QPointF(x, mid + r + 4),
+                                         QPointF(x - r - 4, mid)]))
+            p.setBrush(col)
+            p.drawPolygon(QPolygonF([QPointF(x, mid - r), QPointF(x + r, mid), QPointF(x, mid + r),
+                                     QPointF(x - r, mid)]))
+
 
 class ReproduceDialog(QDialog):
     def __init__(self, project, parent=None):
@@ -187,6 +301,11 @@ class ReproduceDialog(QDialog):
         self.stack = QStackedWidget()
         self.stack.addWidget(self._page_cuts())
         self.stack.addWidget(self._page_choose())
+        self.stack.addWidget(self._page_shakes())
+        from PyQt6.QtGui import QKeySequence, QShortcut
+        sc = QShortcut(QKeySequence(Qt.Key.Key_Space), self)
+        sc.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        sc.activated.connect(self._space)
         lay = QVBoxLayout(self)
         lay.addWidget(self.stack)
 
@@ -410,16 +529,29 @@ class ReproduceDialog(QDialog):
         self.tl_thread = ThumbThread(self)
         self.tl_thread.got.connect(self._tl_icon)
         self.tl_thread.start()
-        self.grid = QListWidget()                       # liste des couteaux / dash / kunai... (défilante)
-        self.grid.setViewMode(QListWidget.ViewMode.ListMode)
-        self.grid.setIconSize(QSize(128, 72))
-        self.grid.setSpacing(3)
+        from .style import BORDER, PANEL, PANEL_2, RED as ACC
+        from .tabs.clips_tab import CARD_H, CARD_W
+        self.grid = QListWidget()                       # grosses cartes des couteaux / dash / kunai... (défilant)
+        self.grid.setObjectName("skins")
+        self.grid.setStyleSheet(
+            f"QListWidget#skins {{ background: transparent; border: none; }}"
+            f"QListWidget#skins::item {{ background: {PANEL}; border: 1px solid {BORDER}; border-radius: 12px;"
+            f" margin: 4px; padding: 6px 4px 8px 4px; color: white; font-weight: 600; }}"
+            f"QListWidget#skins::item:hover {{ border: 1px solid #ffffff55; background: {PANEL_2}; }}"
+            f"QListWidget#skins::item:selected {{ border: 2px solid {ACC}; background: {PANEL_2}; }}"
+            f"QListWidget#skins::item:disabled {{ color: #666; }}")
+        self.grid.setViewMode(QListWidget.ViewMode.IconMode)
+        self.grid.setResizeMode(QListWidget.ResizeMode.Adjust)
+        self.grid.setMovement(QListWidget.Movement.Static)
+        self.grid.setIconSize(QSize(CARD_W, CARD_H))
+        self.grid.setGridSize(QSize(CARD_W + 20, CARD_H + 62))
+        self.grid.setUniformItemSizes(True)
         self.grid.setWordWrap(True)
         self.grid.setVerticalScrollMode(QListWidget.ScrollMode.ScrollPerPixel)
         self.grid.itemClicked.connect(self._pick)
         b_prev = QPushButton("←  Plan précédent")
         b_prev.clicked.connect(lambda: self._show_seg(self.seg - 1))
-        self.b_over = QPushButton("🟩 Superposer une vidéo (fond vert)")
+        self.b_over = QPushButton("🟩 Superposer une vidéo (fond vert ou normale)")
         self.b_over.clicked.connect(self._overlay)
         self.b_remap = QPushButton("⏱ Time remap de ce clip")
         self.b_remap.setToolTip("Régler ou changer le time remap du clip choisi pour ce plan (double-clic sur le clip aussi).")
@@ -508,7 +640,11 @@ class ReproduceDialog(QDialog):
         lv.addLayout(brow)
         lv.addWidget(kick("ENTRÉE DE CE PLAN (LA COUPE JUSTE AVANT)"))
         frow = QHBoxLayout()
-        frow.addWidget(self.fx_fade)
+        self.fx_fade.hide()
+        self.b_fade = QPushButton("🌗  Fondu")
+        self.b_fade.setToolTip("Fondu d'opacité vers ce plan : choisis juste où il commence, le reste se fait seul.")
+        self.b_fade.clicked.connect(self._fade_button)
+        frow.addWidget(self.b_fade)
         frow.addWidget(self.fx_shake)
         frow.addWidget(self.fx_dur)
         frow.addStretch(1)
@@ -641,9 +777,11 @@ class ReproduceDialog(QDialog):
         self.tl_thread.add([(i, self.tl_gen[i], path, t)], first=True)
 
     def _fill_grid(self):
+        from .tabs.clips_tab import _rounded, _symbol
         self.grid.clear()
         for name, clips, img in self._pools():
             pix = QPixmap(img) if img and Path(img).is_file() else QPixmap()
+            card = QIcon(_rounded(pix)) if not pix.isNull() else None
             sym = proj.SPECIAL_FOLDERS.get(name, "")
             attr = proj.SPECIAL_ATTR.get(name)
             if attr:
@@ -653,19 +791,18 @@ class ReproduceDialog(QDialog):
                 for side, label in (("gauche", "⬅ gauche"), ("droite", "droite ➡")):
                     part = [c for c in clips if st and c in getattr(st, side, [])]
                     rest = [c for c in rest if c not in part]
-                    it = QListWidgetItem(f"{sym} {name}\n{label}\n{len(part)} clip(s)")
+                    it = QListWidgetItem(QIcon(_symbol(sym or "🎬")), f"{name}  {label}\n{len(part)} clip(s)")
                     it.setData(ROLE, (name, part))
                     if not part:
                         it.setFlags(it.flags() & ~Qt.ItemFlag.ItemIsEnabled)
                         it.setToolTip("Aucun clip pour cette main : ajoute-en avec « ➕ Ajouter des clips ».")
                     self.grid.addItem(it)
                 if rest:
-                    it = QListWidgetItem(f"{sym} {name}\nmain non choisie\n{len(rest)} clip(s)")
+                    it = QListWidgetItem(QIcon(_symbol(sym or "🎬")), f"{name}  (main ?)\n{len(rest)} clip(s)")
                     it.setData(ROLE, (name, rest))
                     self.grid.addItem(it)
                 continue
-            it = QListWidgetItem(QIcon(pix) if not pix.isNull() else QIcon(),
-                                 f"{sym} {name}\n{len(clips)} clip(s)".strip())
+            it = QListWidgetItem(card or QIcon(_symbol(sym or "🔪")), f"{name}\n{len(clips)} clip(s)")
             it.setData(ROLE, (name, clips))
             self.grid.addItem(it)
 
@@ -727,7 +864,7 @@ class ReproduceDialog(QDialog):
         n = len(self.bounds) - 1
         self.seg_title.setText(f"2. Plan {i + 1} / {n}  —  {fmt(a)} → {fmt(b)}  ({b - a:.2f} s)")
         self.seg_view.show_at(self.path, (a + b) / 2)
-        self.b_go.setText("Terminer  ✓" if i == n - 1 else "Plan suivant  →")
+        self.b_go.setText("Étape 3 : shakes  →" if i == n - 1 else "Plan suivant  →")
         if self.tl.count() == n:
             self.tl.setCurrentRow(i)
             self.tl.scrollToItem(self.tl.item(i))
@@ -752,6 +889,9 @@ class ReproduceDialog(QDialog):
         for w_ in (self.fx_fade, self.fx_shake, self.fx_dur):
             w_.blockSignals(False)
             w_.setEnabled(self.seg > 0 and (w_ is not self.fx_dur or self.fx_shake.currentIndex() > 1))
+        f = int(fx.get("fondu") or 0)
+        self.b_fade.setText(f"🌗  Fondu ✓  ({f} ms)" if f else "🌗  Fondu")
+        self.b_fade.setEnabled(self.seg > 0)
         n = fx.get("multi")
         self.b_man.setText(("🎛  Time remap manuel ✓" if fx.get("manuel") else "🎛  Time remap manuel")
                            + (f"  ({n}K)" if n else ""))
@@ -774,6 +914,230 @@ class ReproduceDialog(QDialog):
             self.fx.pop(self.seg, None)
         else:
             self.fx[self.seg] = fx
+        self.save_state()
+
+    # ------------------------------------------------------------ lecture (espace)
+    def _clip_start(self, path):
+        rm = tr.clip_remaps().get(path)
+        s0 = tr.clip_starts().get(str(path))
+        return float(rm["debut"]) if rm else float(s0 or 0.0)
+
+    def _space(self):
+        page = self.stack.currentIndex()
+        if page == 1:
+            views = (self.seg_view, self.pick_view)
+            if any(v.playing() for v in views):
+                for v in views:
+                    v.stop()
+                self._show_seg(self.seg)
+                return
+            a, b = self.bounds[self.seg], self.bounds[self.seg + 1]
+            self.seg_view.play(self.path, a, b - a)
+            ch = self.choices[self.seg]
+            if ch:
+                self.pick_view.play(ch[1], self._clip_start(ch[1]), b - a)
+        elif page == 2:
+            if self.sh_view.playing():
+                self.sh_view.stop()
+                self._sh_select(self.sh_sel)
+                return
+            e = self.sh_tl[self.sh_sel + 1] if self.sh_sel + 1 < len(self.sh_tl) else None
+            if e:
+                self.sh_view.play(e["clip"], self._clip_start(e["clip"]), e["duree"])
+
+    # ------------------------------------------------------------ fondu (bouton)
+    def _fade_button(self):
+        fx = self.fx.get(self.seg) or {}
+        if fx.get("fondu"):
+            menu = QMenu(self)
+            a1 = menu.addAction("Changer où le fondu commence...")
+            a2 = menu.addAction("Enlever le fondu")
+            act = menu.exec(self.b_fade.mapToGlobal(self.b_fade.rect().bottomLeft()))
+            if act is a2:
+                self.fx_fade.setValue(0)
+                self._show_fx()
+                return
+            if act is not a1:
+                return
+        ms = self._pick_fade_start(int(fx.get("fondu") or 200))
+        if ms:
+            self.fx_fade.setValue(ms)
+            self._show_fx()
+
+    def _pick_fade_start(self, cur_ms):
+        """Petite fenêtre : on choisit la frame de l'edit où le fondu commence (avant la coupe)."""
+        cut = self.bounds[self.seg]
+        lo = max(self.bounds[self.seg - 1] if self.seg > 0 else 0.0, cut - 1.5)
+        n = max(1, int(round((cut - lo) * self.fps)))
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Fondu : où il commence")
+        dlg.resize(720, 520)
+        view = Preview()
+        sl = QSlider(Qt.Orientation.Horizontal)
+        sl.setRange(0, n - 1)
+        sl.setValue(max(0, n - max(1, int(round(cur_ms / 1000 * self.fps)))))
+        lab = QLabel()
+
+        def upd(v):
+            t = lo + v / self.fps
+            lab.setText(f"Le fondu commence ici : {(cut - t) * 1000:.0f} ms avant la coupe "
+                        f"(le clip d'après passe de 0 à 100 % d'opacité jusqu'à la coupe).")
+            view.show_at(self.path, t)
+        sl.valueChanged.connect(upd)
+        upd(sl.value())
+        ok = QPushButton("Valider le fondu")
+        ok.setObjectName("primary")
+        ok.clicked.connect(dlg.accept)
+        k = QLabel("FONDU D'OPACITÉ · CHOISIS LE DÉBUT")
+        k.setObjectName("kicker")
+        lay = QVBoxLayout(dlg)
+        lay.addWidget(k)
+        lay.addWidget(view, 1)
+        lay.addWidget(sl)
+        lay.addWidget(lab)
+        lay.addWidget(ok, alignment=Qt.AlignmentFlag.AlignRight)
+        if not dlg.exec():
+            return 0
+        return max(20, int(round((cut - (lo + sl.value() / self.fps)) * 1000)))
+
+    # ------------------------------------------------------------ étape 3 : shakes
+    def _page_shakes(self):
+        w = QWidget()
+        self.sh_title = QLabel("3. Les shakes")
+        self.sh_title.setStyleSheet("font-size: 18px; font-weight: 700;")
+        info = QLabel("Un shake a été posé automatiquement sur chaque coupe (les losanges). Clique un losange pour "
+                      "le voir et changer sa puissance, ou décoche-le pour l'enlever. Espace : lire le clip.")
+        info.setWordWrap(True)
+        info.setObjectName("hint")
+        self.sh_view = Preview()
+        self.sh_bar = MarkerBar()
+        self.sh_bar.picked.connect(self._sh_select)
+        self.sh_on = QCheckBox("Shake sur cette coupe")
+        self.sh_lvl = QComboBox()
+        for sens in ("in", "out"):
+            for n in range(1, 6):
+                self.sh_lvl.addItem(f"{sens.upper()} {n}x", (sens, n))
+        self.sh_dur = QSpinBox()
+        self.sh_dur.setRange(1, 9)
+        self.sh_dur.setPrefix("durée ")
+        for w_ in (self.sh_on,):
+            w_.toggled.connect(self._sh_edit)
+        self.sh_lvl.currentIndexChanged.connect(self._sh_edit)
+        self.sh_dur.valueChanged.connect(self._sh_edit)
+        self.sh_info = QLabel("")
+        b_prev = QPushButton("◀")
+        b_prev.clicked.connect(lambda: self._sh_select(max(0, self.sh_sel - 1)))
+        b_next = QPushButton("▶")
+        b_next.clicked.connect(lambda: self._sh_select(min(len(self.sh_cfg) - 1, self.sh_sel + 1)))
+        b_all = QPushButton("Appliquer à toutes les coupes")
+        b_all.clicked.connect(self._sh_all)
+        ctl = QHBoxLayout()
+        ctl.addWidget(b_prev)
+        ctl.addWidget(b_next)
+        ctl.addWidget(self.sh_info, 1)
+        ctl.addWidget(self.sh_on)
+        ctl.addWidget(self.sh_lvl)
+        ctl.addWidget(self.sh_dur)
+        ctl.addWidget(b_all)
+        b_back = QPushButton("←  Retour aux clips")
+        b_back.clicked.connect(lambda: (self.stack.setCurrentIndex(1), self._show_seg(self.seg)))
+        b_view = QPushButton("👁  Voir le résultat à côté de l'edit")
+        b_view.clicked.connect(lambda: (self._save_shakes(), self.apply_project(), self.show_final()))
+        b_end = QPushButton("Terminer sans exporter")
+        b_end.clicked.connect(lambda: self.finish(False))
+        b_exp = QPushButton("Exporter l'edit  →")
+        b_exp.setObjectName("primary")
+        b_exp.clicked.connect(lambda: self.finish(True))
+        row = QHBoxLayout()
+        row.addWidget(b_back)
+        row.addStretch(1)
+        row.addWidget(b_view)
+        row.addWidget(b_end)
+        row.addWidget(b_exp)
+        lay = QVBoxLayout(w)
+        lay.addWidget(self.sh_title)
+        lay.addWidget(info)
+        lay.addWidget(self.sh_view, 1)
+        lay.addWidget(self.sh_bar)
+        lay.addLayout(ctl)
+        lay.addLayout(row)
+        self.sh_cfg, self.sh_tl, self.sh_sel = [], [], 0
+        return w
+
+    def start_shakes(self):
+        from app.core import shake
+        self.sh_tl = self.build_timeline()
+        if len(self.sh_tl) < 2:
+            self.finish(False)
+            return
+        base = dict(shake.clean(self.project.shakes), actif=True)
+        self.sh_cfg = []
+        for e in self.sh_tl[1:]:
+            o = (self.fx.get(e["plan"]) or {}).get("shake")
+            if isinstance(o, dict) and o.get("off"):
+                self.sh_cfg.append(None)
+            elif isinstance(o, dict):
+                self.sh_cfg.append(shake.clean(dict(base, **o, actif=True)))
+            else:
+                self.sh_cfg.append(dict(base))               # posé automatiquement
+        t, cuts = 0.0, []
+        for e in self.sh_tl[:-1]:
+            t += e["duree"]
+            cuts.append(t)
+        self.sh_bar.set(t + self.sh_tl[-1]["duree"], cuts, self.sh_cfg)
+        self.stack.setCurrentIndex(2)
+        self.sh_title.setText(f"3. Les shakes — {len(cuts)} coupe(s)")
+        self._sh_select(0)
+
+    def _sh_select(self, i):
+        if not self.sh_cfg:
+            return
+        self.sh_sel = i = max(0, min(len(self.sh_cfg) - 1, i))
+        self.sh_bar.select(i)
+        c = self.sh_cfg[i]
+        e = self.sh_tl[i + 1]
+        for w_ in (self.sh_on, self.sh_lvl, self.sh_dur):
+            w_.blockSignals(True)
+        self.sh_on.setChecked(c is not None)
+        if c:
+            self.sh_lvl.setCurrentIndex(max(0, self.sh_lvl.findData((c["sens"], c["niveau"]))))
+            self.sh_dur.setValue(c["duree"])
+        self.sh_lvl.setEnabled(c is not None)
+        self.sh_dur.setEnabled(c is not None)
+        for w_ in (self.sh_on, self.sh_lvl, self.sh_dur):
+            w_.blockSignals(False)
+        self.sh_info.setText(f"Coupe {i + 1}/{len(self.sh_cfg)}  ·  {fmt(self.sh_bar.cuts[i])}  ·  "
+                             f"vers {vclip.name(e['clip'])}")
+        self.sh_view.show_at(e["clip"], self._clip_start(e["clip"]))
+
+    def _sh_edit(self, *_):
+        if not self.sh_cfg:
+            return
+        if self.sh_on.isChecked():
+            s, n = self.sh_lvl.currentData()
+            self.sh_cfg[self.sh_sel] = {"actif": True, "sens": s, "niveau": n, "duree": self.sh_dur.value()}
+        else:
+            self.sh_cfg[self.sh_sel] = None
+        self.sh_lvl.setEnabled(self.sh_on.isChecked())
+        self.sh_dur.setEnabled(self.sh_on.isChecked())
+        self.sh_bar.set(self.sh_bar.total, self.sh_bar.cuts, self.sh_cfg)
+        self.sh_bar.select(self.sh_sel)
+
+    def _sh_all(self):
+        c = self.sh_cfg[self.sh_sel] if self.sh_cfg else None
+        self.sh_cfg = [dict(c) if c else None for _ in self.sh_cfg]
+        self.sh_bar.set(self.sh_bar.total, self.sh_bar.cuts, self.sh_cfg)
+        self.sh_bar.select(self.sh_sel)
+
+    def _save_shakes(self):
+        """Les réglages de l'étape 3 vont dans chaque plan (ils servent au rendu)."""
+        if not self.sh_cfg or self.stack.currentIndex() != 2:
+            return
+        for e, c in zip(self.sh_tl[1:], self.sh_cfg):
+            fx = dict(self.fx.get(e["plan"]) or {})
+            fx["shake"] = ({"sens": c["sens"], "niveau": c["niveau"], "duree": c["duree"]} if c
+                           else {"off": True})
+            self.fx[e["plan"]] = fx
         self.save_state()
 
     # ------------------------------------------------------------ 2K / 3K / 4K + time remap manuel
@@ -959,7 +1323,7 @@ class ReproduceDialog(QDialog):
         self.b_over.setEnabled(bool(ch))
         self.b_remap.setEnabled(bool(ch))
         self.b_over.setText(f"🟩 Superposition : {Path(ov['fichier']).name}  (modifier)" if ov
-                            else "🟩 Superposer une vidéo (fond vert)")
+                            else "🟩 Superposer une vidéo (fond vert ou normale)")
         if not ch:
             self.pick_name.setText("Aucun clip choisi pour ce plan.")
             self.pick_view.clear()
@@ -1125,7 +1489,7 @@ class ReproduceDialog(QDialog):
         if self.seg < len(self.bounds) - 2:
             self._show_seg(self.seg + 1)
         else:
-            self.finish()
+            self.start_shakes()                         # étape 3 : les shakes, posés automatiquement
 
     def build_timeline(self):
         """Un élément par plan, dans l'ordre (un même clip peut revenir plusieurs fois).
@@ -1155,7 +1519,8 @@ class ReproduceDialog(QDialog):
                 lead += d
         return timeline
 
-    def finish(self):
+    def apply_project(self):
+        """Met le montage dans le projet (clips dans l'ordre, durées, time remaps, effets, musique)."""
         timeline = self.build_timeline()
         clips = list(dict.fromkeys(e["clip"] for e in timeline))
         saved = tr.clip_remaps()
@@ -1180,12 +1545,11 @@ class ReproduceDialog(QDialog):
             self.project.save()
         except (OSError, ValueError):
             pass
-        ask = QMessageBox.question(self, "Terminé ✓",
-                                   "Ton montage est prêt.\n\nVeux-tu voir le résultat à côté de l'edit d'exemple ? "
-                                   "(je fais le vrai rendu : ralentis, shakes, fondus… ça peut prendre quelques minutes)")
-        if ask == QMessageBox.StandardButton.Yes:
-            self.show_final()
-        self.accept()
+
+    def finish(self, export=False):
+        self._save_shakes()
+        self.apply_project()
+        self.done(2 if export else 1)                 # 2 = on enchaîne sur l'export de l'edit
 
     def _keep_music(self):
         """Garde la musique de l'edit : elle devient la musique du projet."""

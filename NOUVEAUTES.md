@@ -1,3 +1,13 @@
+## Nouveautés de la version 1.4.0
+
+- **Barre espace = lecture** (Reproduire) : les 2 vidéos (plan de l'edit + ton clip) se lisent tout de suite, en boucle, sans barre de chargement. Espace pour arrêter.
+- **Bouton 🌗 Fondu** : tu choisis juste où le fondu commence (sur l'image de l'edit), tout le reste se fait seul.
+- **Étape 3 : les shakes** : après avoir placé tous les clips, une page montre ton montage avec un losange par coupe (un shake posé automatiquement sur chaque clip). Clique un losange pour changer sa puissance (IN/OUT 1x–5x, durée) ou l'enlever, puis « Exporter l'edit ».
+- **Liste des skins en grosses cartes**, comme dans Mes clips, sans grands espaces vides.
+- **Time remap manuel** : clique dans le graphique pour ajouter autant de keyframes que tu veux, glisse les points pour les déplacer.
+- **Superposition sans fond vert** : décoche « Enlever un fond vert » pour poser une vidéo normale.
+- **Nouveau look « AuraScript »** (noir & rouge, titres de sections avec barre rouge), thème par défaut. Les autres thèmes restent dans 🎨 Thème.
+
 ## Nouveautés de la version 1.3.0
 
 - **2K / 3K / 4K dismiss ou flick away** (Reproduire, étape 2) : le bouton enlève les 2, 3 ou 4 transitions qui suivent le plan (un seul clip pour tout le passage), puis ouvre le **time remap manuel**.

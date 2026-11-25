@@ -2,7 +2,7 @@
 
 Chaque keyframe dit : « à tel moment du plan, on montre telle frame du clip ». Entre deux keyframes,
 la courbe (code Flow / cubic-bezier) règle l'accélération."""
-from PyQt6.QtCore import QPointF, Qt
+from PyQt6.QtCore import QPointF, Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QPainter, QPen
 from PyQt6.QtWidgets import (QComboBox, QDialog, QDoubleSpinBox, QHBoxLayout, QHeaderView, QLabel, QMessageBox,
                              QPushButton, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
@@ -17,12 +17,47 @@ PRESETS = [("Douce", "0.33, 0, 0.67, 1"), ("Flow forte", "0.69, 0, 0.31, 1"), ("
 
 
 class Graph(QWidget):
-    """Courbe : temps du clip (vertical) selon le moment du plan (horizontal)."""
+    """Courbe : temps du clip (vertical) selon le moment du plan (horizontal).
+    Clic dans le vide = nouvelle keyframe à cet endroit ; glisser un point = le déplacer."""
+    added = pyqtSignal(float, float)          # moment du plan, temps du clip
+    moved = pyqtSignal(int, float, float)
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setMinimumSize(320, 200)
+        self.setMinimumSize(320, 220)
+        self.setCursor(Qt.CursorShape.CrossCursor)
         self.keys, self.curves, self.total = [], [], 1.0
+        self.view = None                      # (lo, hi, end) du dernier dessin
+        self.drag = None
+
+    def _vals(self, pos):
+        lo, hi, end = self.view
+        m = 14
+        w, h = self.width() - 2 * m, self.height() - 2 * m
+        a = min(max((pos.x() - m) / w, 0.0), 1.0) * end
+        b = lo + (1 - min(max((pos.y() - m) / h, 0.0), 1.0)) * (hi - lo)
+        return a, max(0.0, b)
+
+    def mousePressEvent(self, e):
+        if not self.view:
+            return
+        lo, hi, end = self.view
+        m = 14
+        w, h = self.width() - 2 * m, self.height() - 2 * m
+        pos = e.position()
+        for i, (a, b) in enumerate(self.keys):
+            x, y = m + w * a / end, m + h * (1 - (b - lo) / (hi - lo))
+            if abs(x - pos.x()) < 10 and abs(y - pos.y()) < 10:
+                self.drag = i
+                return
+        self.added.emit(*self._vals(pos))
+
+    def mouseMoveEvent(self, e):
+        if self.drag is not None and self.view:
+            self.moved.emit(self.drag, *self._vals(e.position()))
+
+    def mouseReleaseEvent(self, e):
+        self.drag = None
 
     def set(self, keys, curves, total):
         self.keys, self.curves, self.total = keys, curves, total
@@ -40,8 +75,10 @@ class Graph(QWidget):
             ts = tr.manual_times(self.keys, self.curves, self.total)
         except ValueError:
             return
-        lo, hi = min(ts), max(ts)
-        hi = hi if hi > lo else lo + 0.01
+        lo, hi = min(ts + [k[1] for k in self.keys]), max(ts + [k[1] for k in self.keys])
+        pad = max(0.05, (hi - lo) * 0.15)
+        lo, hi = max(0.0, lo - pad), hi + pad
+        self.view = (lo, hi, max(k[0] for k in self.keys) or 1.0)
         m = 14
         w, h = self.width() - 2 * m, self.height() - 2 * m
 
@@ -77,8 +114,9 @@ class ManualRemapDialog(QDialog):
         kick.setObjectName("kicker")
         head = QLabel(title)
         head.setObjectName("h1")
-        hint = QLabel(f"Le plan dure {self.total:.2f} s. Place-toi sur un moment du plan, choisis la frame du clip "
-                      "à montrer à ce moment, puis « ➕ Keyframe ici ». Entre 2 keyframes, la courbe règle "
+        hint = QLabel(f"Le plan dure {self.total:.2f} s. Clique dans le graphique pour ajouter autant de keyframes "
+                      "que tu veux, glisse les points pour les déplacer. Ou : place-toi sur un moment du plan, "
+                      "choisis la frame du clip, puis « ➕ Keyframe ici ». Entre 2 keyframes, la courbe règle "
                       "l'accélération (colle un code Flow ou choisis un préréglage). Pour un reverse, mets une "
                       "frame plus tôt dans le clip sur la keyframe suivante.")
         hint.setObjectName("hint")
@@ -116,6 +154,8 @@ class ManualRemapDialog(QDialog):
             self.blend.addItem(v, k)
         self.blend.setCurrentIndex(max(0, self.blend.findData(data.get("blending_mode", "motion"))))
         self.graph = Graph()
+        self.graph.added.connect(self._graph_add)
+        self.graph.moved.connect(self._graph_move)
 
         ok = QPushButton("Valider ce time remap")
         ok.setObjectName("primary")
@@ -196,6 +236,28 @@ class ManualRemapDialog(QDialog):
         order = sorted(range(len(keys)), key=lambda i: keys[i][0])
         allc = curves + [PRESETS[0][1]] * (len(keys) - len(curves))
         self._fill([keys[i] for i in order], [allc[i] for i in order])
+
+    def _graph_add(self, a, b):
+        """Clic sur le graphique : nouvelle keyframe (moment = position horizontale, frame = hauteur)."""
+        self.moment.setValue(a)
+        n = self.picker.slider.maximum() + 1
+        self.picker.setup(n, min(n - 1, int(round(b * tr.FPS))))
+        self.picker.show_frame()
+        self._add()
+
+    def _graph_move(self, i, a, b):
+        keys, curves = self._keys()
+        if not 0 <= i < len(keys):
+            return
+        if 0 < i < len(keys) - 1:                       # la 1re et la dernière restent au début / à la fin
+            a = min(max(a, keys[i - 1][0] + 1 / tr.FPS), keys[i + 1][0] - 1 / tr.FPS)
+            keys[i][0] = round(a, 3)
+        keys[i][1] = round(b * tr.FPS) / tr.FPS
+        self.table.blockSignals(True)
+        self.table.item(i, 0).setText(f"{keys[i][0]:.3f}")
+        self.table.item(i, 1).setText(f"{int(round(keys[i][1] * tr.FPS))}")
+        self.table.blockSignals(False)
+        self._sync()
 
     def _del(self):
         r = self.table.currentRow()

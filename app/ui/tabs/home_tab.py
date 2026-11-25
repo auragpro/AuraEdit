@@ -106,7 +106,7 @@ class HomeTab(QWidget):
         self.refresh()
 
     # ------------------------------------------------------------ rendu
-    def render(self):
+    def render(self, skip_confirm=False):
         if self.thread is not None and self.thread.isRunning():
             return
         if not self.project.clips:
@@ -123,6 +123,8 @@ class HomeTab(QWidget):
         if not out.lower().endswith(".mp4"):
             out += ".mp4"
         try:                                       # shakes posés automatiquement : on confirme coupe par coupe
+            if skip_confirm:
+                raise StopIteration
             from app.core import shake
             from ..shake_cuts_dialog import ShakeCutsDialog, cut_rows
             rows, over = cut_rows(self.project)

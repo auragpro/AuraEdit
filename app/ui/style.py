@@ -14,6 +14,8 @@ def asset(name):
 
 # ---------------------------------------------------------------- thèmes
 THEMES = {
+    "AuraScript (noir & rouge)": {"accent": "#e5323f", "accent2": "#ff6b6b", "bg": "#0b0b0d", "panel": "#131316",
+                                  "panel2": "#1a1a1e", "border": "#2a2a31", "text": "#f2f2f4", "muted": "#8b8b95"},
     "Aura (violet)": {"accent": "#7c5cff", "accent2": "#c06bff", "bg": "#0a0f1c", "panel": "#101828",
                       "panel2": "#172238", "border": "#1f2c45", "text": "#e8ecf5", "muted": "#8391ab"},
     "Valorant (rouge)": {"accent": "#ff4655", "accent2": "#ff8a5c", "bg": "#0c131b", "panel": "#131e29",
@@ -27,7 +29,7 @@ THEMES = {
     "Or": {"accent": "#f5b82e", "accent2": "#ff7a2e", "bg": "#100e08", "panel": "#1a170e",
            "panel2": "#242014", "border": "#3a321c", "text": "#f6f1e4", "muted": "#a39b84"},
 }
-DEFAULT_THEME = "Aura (violet)"
+DEFAULT_THEME = "AuraScript (noir & rouge)"
 KEYS = ("accent", "accent2", "bg", "panel", "panel2", "border", "text", "muted")
 
 
@@ -97,8 +99,8 @@ QLabel#title {{ font-size: 46px; font-weight: 800; letter-spacing: 6px;
                color: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #ffffff, stop:0.5 {A2}, stop:1 {A}); }}
 QLabel#subtitle {{ color: {M}; font-size: 15px; }}
 QLabel#h1 {{ font-size: 24px; font-weight: 700; color: #ffffff; }}
-QLabel#kicker {{ color: {M}; font-family: "Consolas", "Cascadia Mono", monospace; font-size: 11px;
-                letter-spacing: 2px; }}
+QLabel#kicker {{ color: {T}; font-size: 11px; font-weight: 800; letter-spacing: 2px;
+                border-left: 3px solid {A}; padding-left: 8px; }}
 QLabel#hint {{ color: {M}; }}
 QLabel#version {{ color: {M}; font-size: 12px; }}
 QLabel#ok {{ color: {GREEN}; }}
@@ -115,11 +117,11 @@ QWidget#side QLabel, QWidget#side QPushButton {{ background: transparent; }}
 QPushButton {{
     background: {P2};
     border: 1px solid {B};
-    border-radius: 10px;
+    border-radius: 9px;
     padding: 8px 16px;
     font-weight: 600;
 }}
-QPushButton:hover {{ border-color: {A}; background: {rgba(A, 0.12)}; color: #ffffff; }}
+QPushButton:hover {{ border-color: {rgba(T, 0.35)}; background: {rgba(T, 0.06)}; color: #ffffff; }}
 QPushButton:pressed {{ background: {rgba(A, 0.25)}; }}
 QPushButton:checked {{ background: {rgba(A, 0.30)}; border-color: {A}; color: #ffffff; }}
 QPushButton:disabled {{ color: {rgba(M, 0.6)}; border-color: {B}; background: {P}; }}
@@ -133,6 +135,10 @@ QPushButton#big:hover {{ background: qlineargradient(x1:0, y1:0, x2:1, y2:1, sto
 QPushButton#link {{ background: transparent; border: none; color: {M}; padding: 4px; }}
 QPushButton#link:hover {{ color: {A2}; background: transparent; }}
 QPushButton#pill {{ border-radius: 15px; padding: 5px 14px; font-size: 13px; }}
+QPushButton#seg {{ border-radius: 10px; padding: 7px 14px; font-weight: 800; letter-spacing: 1px; }}
+QPushButton#seg:checked {{ background: {T}; color: {BG}; border-color: {T}; }}
+QFrame#section {{ background: {P}; border: 1px solid {B}; border-radius: 14px; }}
+QFrame#section QLabel, QFrame#section QCheckBox {{ background: transparent; }}
 
 QListWidget {{
     background: {P};
@@ -152,8 +158,8 @@ QListWidget#sidebar {{ background: transparent; border: none; border-radius: 0; 
                       font-size: 12px; }}
 QListWidget#sidebar::item {{ padding: 10px 2px; margin: 3px 0; border-radius: 12px; color: {M}; }}
 QListWidget#sidebar::item:hover {{ background: {rgba(T, 0.05)}; color: {T}; }}
-QListWidget#sidebar::item:selected {{ background: {rgba(A, 0.18)}; border: 1px solid {rgba(A, 0.7)};
-                                     color: #ffffff; font-weight: 700; }}
+QListWidget#sidebar::item:selected {{ background: {rgba(T, 0.08)}; border: 1px solid {rgba(T, 0.25)};
+                                     border-left: 3px solid {A}; color: #ffffff; font-weight: 700; }}
 
 QLineEdit, QTextBrowser, QTextEdit, QPlainTextEdit, QSpinBox, QDoubleSpinBox {{
     background: {BG};

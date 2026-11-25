@@ -13,9 +13,9 @@ from version import __version__
 from .style import RED, asset
 
 WHATS_NEW = [
-    "2K / 3K / 4K + time remap manuel (keyframes, courbes)",
-    "🎯 Caler le début des clips sur l'edit",
-    "Edit auto qui reconnaît mieux couteaux, dash, kunai"]
+    "Espace = lire les 2 vidéos, étape 3 : shakes",
+    "Bouton Fondu, grosses cartes de skins",
+    "Nouveau look AuraScript (noir & rouge)"]
 
 
 def ago(ts):

@@ -6,6 +6,7 @@ from PyQt6.QtWidgets import QVBoxLayout, QWidget
 class ReproduceTab(QWidget):
     changed = pyqtSignal()
     finished_ok = pyqtSignal(bool)
+    export_requested = pyqtSignal()
 
     def __init__(self, project, parent=None):
         super().__init__(parent)
@@ -32,6 +33,8 @@ class ReproduceTab(QWidget):
         self.changed.emit()
         self.finished_ok.emit(ok)
         self._new()                                             # prêt pour reprendre / un autre edit
+        if result == 2:                                         # « Exporter l'edit » : on enchaîne sur le rendu
+            self.export_requested.emit()
 
     def stop(self):
         """Fermeture de l'app : arrête les analyses et sauvegarde l'edit en cours."""

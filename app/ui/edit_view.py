@@ -47,6 +47,7 @@ class EditView(QWidget):
         self.tabs["Montage"].render_requested.connect(self._render)
         self.tabs["Montage"].parts["Clips"].go_library.connect(lambda: self.select("Mes clips"))
         self.tabs["Reproduire"].finished_ok.connect(self.tabs["Montage"].after_reproduce)
+        self.tabs["Reproduire"].export_requested.connect(self._export_after_reproduce)
         self.sidebar.currentRowChanged.connect(self._row)
 
         self.title = QLabel(project.name)
@@ -82,6 +83,10 @@ class EditView(QWidget):
             self.pages.setCurrentIndex(item.data(ROLE))
             if self.pages.currentWidget() is self.tabs.get("Montage"):
                 self.tabs["Montage"].home()            # revient aux gros carrés
+
+    def _export_after_reproduce(self):
+        self.select("Accueil")
+        self.tabs["Accueil"].render(skip_confirm=True)       # shakes déjà confirmés à l'étape 3
 
     def _render(self):
         self.select("Accueil")

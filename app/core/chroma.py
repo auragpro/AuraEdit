@@ -20,7 +20,7 @@ from . import audio
 
 DEFAULT = {"fichier": None, "couleur": "#00ff00", "tolerance": 50, "douceur": 30, "retrecir": 1,
            "adoucir": 1, "spill": 80, "taille": 100, "x": 0, "y": 0, "debut": 0.0, "fin": None,
-           "boucle": False, "continuer": True, "fluide": True,
+           "boucle": False, "continuer": True, "fluide": True, "detourer": True,
            "entree": "aucune", "entree_duree": 0.3, "sortie": "aucune", "sortie_duree": 0.3}
 TRANSITIONS = [("aucune", "Aucune"), ("fondu", "Fondu"), ("dissolve", "Dissolve Luma (désintégration)")]
 LUMA = np.array([0.2126, 0.7152, 0.0722], np.float32)
@@ -87,6 +87,9 @@ def key(img, cfg, scale=1.0):
     """img : HxWx3 uint8 RGB. Renvoie (rgb float32 0..1 nettoyé, alpha float32 0..1)."""
     cfg = cfg_full(cfg)
     P = img.astype(np.float32) / 255
+    if not cfg.get("detourer", True):           # vidéo normale (pas de fond vert) : seules les bandes de cadrage partent
+        d = np.abs(P - np.array([0.0, 1.0, 0.0], np.float32)).max(axis=2)
+        return P, (d > 0.15).astype(np.float32)
     C = hex_rgb(cfg["couleur"])
     m, s, kv = _match(P, C)
     hi = 1 - float(cfg["tolerance"]) * 0.008
@@ -125,7 +128,8 @@ def layout(cfg, W, H):
 
 def fit_filter(cfg, w, h, motion=None):
     """Met la vidéo dans w x h (bandes de la couleur du fond, donc enlevées). motion : filtre de cadence."""
-    col = cfg_full(cfg)["couleur"].lstrip("#")
+    c = cfg_full(cfg)
+    col = c["couleur"].lstrip("#") if c.get("detourer", True) else "00ff00"
     f = (f"scale={w}:{h}:force_original_aspect_ratio=decrease:flags=bicubic,"
          f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:color=0x{col},setsar=1")
     return f + (f",{motion}" if motion else "") + ",format=rgb24"

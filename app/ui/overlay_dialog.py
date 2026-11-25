@@ -98,6 +98,10 @@ class OverlayDialog(QDialog):
         form.addRow("", self.c_fluid)
         # --- détourage
         form.addRow(self._title("Détourage"))
+        self.c_key = QCheckBox("Enlever un fond vert (décoche pour une vidéo normale, sans détourage)")
+        self.c_key.setChecked(bool(self.cfg.get("detourer", True)))
+        self.c_key.toggled.connect(self._keying)
+        form.addRow("", self.c_key)
         form.addRow("Couleur du fond à enlever", crow)
         self.sl = {}
         for key, label, lo, hi in [("tolerance", "Tolérance", 0, 100), ("douceur", "Douceur du masque", 0, 100),
@@ -115,6 +119,9 @@ class OverlayDialog(QDialog):
             form.addRow(label, self._row(s, val))
             self.sl[key] = s
         form.addRow("Affichage", self.mode)
+        self._key_widgets = [self.swatch, self.b_pip, b_auto] + [self.sl[k] for k in
+                                                                 ("tolerance", "douceur", "retrecir", "adoucir", "spill")]
+        self._keying(self.c_key.isChecked(), redraw=False)
         # --- apparition / disparition
         form.addRow(self._title("Apparition / disparition"))
         for k in ("entree", "sortie"):
@@ -309,6 +316,13 @@ class OverlayDialog(QDialog):
         self._color(chroma.rgb_hex(np.median(zone, axis=0)))
 
     # ------------------------------------------------------------ réglages / aperçu
+    def _keying(self, on, redraw=True):
+        self.cfg["detourer"] = bool(on)
+        for w in self._key_widgets:
+            w.setEnabled(bool(on))
+        if redraw:
+            self.ftimer.start(30)
+
     def _set(self, k, v, lab):
         self.cfg[k] = v
         lab.setText(str(v))
