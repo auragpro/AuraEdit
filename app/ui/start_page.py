@@ -13,9 +13,9 @@ from version import __version__
 from .style import RED, asset
 
 WHATS_NEW = [
-    "Nouveau look moderne avec effets de lumière",
-    "Reproduire : timeline des clips, clic = aller au plan",
-    "Reproduire : la musique de l'edit est gardée"]
+    "Nouveau design + thèmes au choix (🎨 Thème en haut)",
+    "Reproduire dans son propre onglet, vidéos à gauche",
+    "Plus de barres noires : bords en miroir"]
 
 
 def ago(ts):

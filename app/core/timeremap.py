@@ -597,7 +597,8 @@ def _render(path, start, end, cfg, output, is_cancelled=None, progress=None):
     vf = f"fps={sfps:g}"
     if mode == "motion":
         vf += f",minterpolate=fps={rate:g}:mi_mode=mci:mc_mode=obmc:me_mode=bidir"
-    vf += f",scale={W}:{H}:force_original_aspect_ratio=decrease,pad={W}:{H}:(ow-iw)/2:(oh-ih)/2,setsar=1"
+    from . import fit
+    vf += f",{fit.mirror_fill(path, W, H)},setsar=1"                # bords en miroir, pas de barres noires
     label = "Pixel Motion" if mode == "motion" else "time remap"
     frames, lastframe = _decode_parallel(path, lo, sfps, factor, vf, needed, last_needed,
                                          is_cancelled, progress, label)

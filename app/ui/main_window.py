@@ -2,8 +2,8 @@
 import json
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import (QLabel, QMainWindow, QMessageBox, QProgressBar, QStackedWidget,
-                             QVBoxLayout, QWidget)
+from PyQt6.QtWidgets import (QHBoxLayout, QLabel, QMainWindow, QMessageBox, QProgressBar, QPushButton,
+                             QStackedWidget, QVBoxLayout, QWidget)
 
 from app.core import project as proj
 from version import __version__
@@ -51,10 +51,40 @@ class MainWindow(QMainWindow):
         self.start_page.check_updates.connect(self.manual_update_check)
         self.stack.addWidget(self.loading)
         self.stack.addWidget(self.start_page)
-        self.setCentralWidget(self.stack)
+        # barre du haut : options (thème) + nom de l'app en haut à droite
+        top = QWidget()
+        top.setObjectName("topbar")
+        top.setFixedHeight(52)
+        tl = QHBoxLayout(top)
+        tl.setContentsMargins(18, 6, 20, 6)
+        self.top_info = QLabel(f"VERSION {__version__}")
+        self.top_info.setObjectName("kicker")
+        b_theme = QPushButton("🎨  Thème")
+        b_theme.setObjectName("pill")
+        b_theme.setCursor(Qt.CursorShape.PointingHandCursor)
+        b_theme.setToolTip("Options : choisir ou personnaliser le thème de l'app")
+        b_theme.clicked.connect(self.open_theme)
+        name = QLabel("AuraEdit")
+        name.setObjectName("appname")
+        tl.addWidget(self.top_info)
+        tl.addStretch(1)
+        tl.addWidget(b_theme)
+        tl.addSpacing(14)
+        tl.addWidget(name)
+        central = QWidget()
+        cl = QVBoxLayout(central)
+        cl.setContentsMargins(0, 0, 0, 0)
+        cl.setSpacing(0)
+        cl.addWidget(top)
+        cl.addWidget(self.stack, 1)
+        self.setCentralWidget(central)
 
         self.edit_view = None
         self.check_thread = None
+
+    def open_theme(self):
+        from .theme_dialog import ThemeDialog
+        ThemeDialog(self).exec()
 
     # ------------------------------------------------- 1. mises à jour
     def start(self):

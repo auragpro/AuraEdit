@@ -43,7 +43,7 @@ class MontageTab(QWidget):
         grid_page = QWidget()
         grid = QGridLayout()
         grid.setSpacing(18)
-        names = [n for n, _ in PARTS] + ["Reproduire", "Générer"]
+        names = [n for n, _ in PARTS] + ["Générer"]
         for i, name in enumerate(names):
             b = QPushButton()
             b.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
@@ -52,8 +52,6 @@ class MontageTab(QWidget):
             b.setStyleSheet(GEN_CSS if name == "Générer" else TILE_CSS)
             if name == "Générer":
                 b.clicked.connect(self.render_requested.emit)
-            elif name == "Reproduire":
-                b.clicked.connect(self.reproduce)
             else:
                 b.clicked.connect(lambda _=False, n=name: self.open(n))
             self.tiles[name] = b
@@ -122,7 +120,6 @@ class MontageTab(QWidget):
             "Dash back": hands(p.dashback),
             "Dismiss": hands(p.dismiss),
             "Shake": self.parts["Shake"].summary() if "Shake" in self.parts else "",
-            "Reproduire": "copier un edit fini",
             "Générer": "rendu MP4",
         }
         for n, b in self.tiles.items():
@@ -132,10 +129,9 @@ class MontageTab(QWidget):
                 sub = sub[:32] + "…"
             b.setText(f"{ICONS[n]}\n{label}\n{sub}")
 
-    def reproduce(self):
-        from ..reproduce_dialog import ReproduceDialog
-        ok = ReproduceDialog(self.project, self).exec()
-        self._changed()                       # clips ajoutés depuis Reproduire : tout se met à jour
+    def after_reproduce(self, ok=True):
+        """Reproduire (onglet à part) vient de remplir le projet : tout se met à jour."""
+        self._changed()
         if ok:
             clips = self.parts["Clips"]
             clips.order.clear()
@@ -143,7 +139,6 @@ class MontageTab(QWidget):
                 clips.order.addItem(clips._order_item(c))
             clips.sync()
             clips.refresh_left()
-            self.open("Clips")
             self._changed()
 
     def stop(self):

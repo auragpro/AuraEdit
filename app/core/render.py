@@ -48,7 +48,22 @@ def duration(path):
     return int(m[1]) * 3600 + int(m[2]) * 60 + float(m[3]) if m else 0.0
 
 
+def timeline_of(project):
+    """La timeline de Reproduire si elle correspond encore aux clips du projet (sinon None)."""
+    tl = getattr(project, "timeline", None) or []
+    if tl and [e.get("clip") for e in tl] == list(project.clips):
+        return tl
+    return None
+
+
 def segments(project):
+    tl = timeline_of(project)
+    if tl:                                               # Reproduire : chaque plan dans l'ordre, doublons gardés
+        segs = [("intro", project.intro)] if project.intro else []
+        segs += [("clip", e["clip"]) for e in tl]
+        if project.outro:
+            segs.append(("outro", project.outro))
+        return [(k, p) for k, p in segs if p and (k == "clip" or vclip.exists(p))]
     segs = []
     if project.intro:
         segs.append(("intro", project.intro))
@@ -64,7 +79,7 @@ def _overlays(project, info, video, is_list, tmp, ff, total, progress, is_cancel
     ovs = getattr(project, "overlays", None) or {}
     items = []
     for s in info:
-        ov = ovs.get(s["fichier"]) if s["type"] == "clip" else None
+        ov = s.get("overlay") or (ovs.get(s["fichier"]) if s["type"] == "clip" and not s.get("tl") else None)
         if ov and ov.get("fichier") and Path(ov["fichier"]).is_file():
             items.append({**ov, "t0": s["debut"], "clip_duree": s["duree"]})
     if not items:
@@ -92,9 +107,14 @@ def render(project, output, progress=None, is_cancelled=None, export=None):
     if not any(k == "clip" for k, _ in segs):
         raise RenderError("Aucun clip trouvé : ajoute des clips dans l'onglet Clips.")
     ff = audio.ffmpeg_exe()
-    vf = (f"scale={W}:{H}:force_original_aspect_ratio=decrease,pad={W}:{H}:(ow-iw)/2:(oh-ih)/2,"
-          f"setsar=1,fps={FPS},format=yuv420p")
+    from . import fit
+
+    def vf_for(path):                                    # pas de barres noires : bords en miroir
+        return f"{fit.mirror_fill(path, W, H)},setsar=1,fps={FPS},format=yuv420p"
     steps = len(segs) + 1
+    tl = timeline_of(project)
+    tl_items = iter(tl or [])
+    seg_tl = [next(tl_items, None) if (tl and k == "clip") else None for k, _ in segs]
     with tempfile.TemporaryDirectory(prefix="auraedit_") as tmp:
         tmp = Path(tmp)
         import os
@@ -117,7 +137,7 @@ def render(project, output, progress=None, is_cancelled=None, export=None):
             plan = None
             if kind == "clip":                                   # durée du plan : jusqu'au clip suivant
                 from . import markers as _mk
-                plan = ((getattr(project, "plans", None) or {}).get(path)
+                plan = ((seg_tl[i] or {}).get("duree") or (getattr(project, "plans", None) or {}).get(path)
                         or (remap or {}).get("plan") or _mk.gap_for(project, path))
             if remap:
                 from . import timeremap
@@ -140,9 +160,9 @@ def render(project, output, progress=None, is_cancelled=None, export=None):
                 from . import timeremap as _tr
                 ss = _tr.clip_starts().get(str(path))
             cut = []
-            vfx = vf
+            vfx = vf_for(path)
             if plan:                                             # coupé pile au clip suivant
-                vfx = vf + f",tpad=stop_mode=clone:stop_duration={plan:.3f}"
+                vfx += f",tpad=stop_mode=clone:stop_duration={plan:.3f}"
                 cut = ["-t", f"{plan:.4f}"]
             _run([ff, "-y", "-hide_banner", *vclip.input_args(path, ss=ss), "-an", "-vf", vfx, *cut,
                   "-c:v", "libx264", "-preset", "veryfast", "-crf", "10", "-threads", "4", str(part)], is_cancelled)
@@ -167,8 +187,12 @@ def render(project, output, progress=None, is_cancelled=None, export=None):
                     f.cancel()
                 raise
         parts, info, t = [], [], 0.0
-        for (kind, path), (part, d, tr_) in zip(segs, results):
+        for (kind, path), (part, d, tr_), e in zip(segs, results, seg_tl):
             item = {"type": kind, "fichier": str(path), "debut": round(t, 3), "duree": round(d, 3)}
+            if e is not None:
+                item["tl"] = True
+                if e.get("overlay"):
+                    item["overlay"] = e["overlay"]
             if tr_:
                 item["time_remap"] = True
             info.append(item)

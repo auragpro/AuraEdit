@@ -1,3 +1,11 @@
+## Nouveautés de la version 1.1.0
+
+- **Nouveau design complet** façon tableau de bord : fond bleu nuit, panneaux arrondis, dégradés, halos lumineux, menu de gauche avec icônes, petits titres en majuscules.
+- **Options → 🎨 Thème** (en haut à droite) : 6 thèmes proposés (Aura violet, Valorant rouge, Cyan, Émeraude, Sunset, Or) ou **Personnalisé** (tu choisis chaque couleur). Le nom **AuraEdit** est affiché en haut à droite.
+- **Reproduire a son propre onglet** (🎞 dans le menu de gauche), avec toutes ses fonctions. Étape 2 : les 2 vidéos (plan de l'edit + ton clip) à gauche, la liste des couteaux / dash / kunai à droite qu'on fait défiler, bouton **⛶ Plein écran**.
+- **Correction : les clips ne sont plus enlevés.** Un même clip utilisé sur plusieurs plans est gardé à chaque fois, dans l'ordre. Un plan laissé vide rallonge le clip d'avant pour que tout reste calé sur la musique.
+- **Plus de barres noires** : si un clip n'est pas au format 16:9, les bords sont remplis par la vidéo en miroir (effet mosaïque).
+
 ## Nouveautés de la version 1.0.3
 
 - **Nouveau look moderne avec effets de lumière, dans toute l'app** : dégradés et reflets sur les boutons, panneaux et listes, halo rouge lumineux autour des boutons principaux (plus fort au survol) et sur chaque bouton survolé, menu de gauche avec lueur rouge sur la page active, titre en dégradé, curseurs et barres de progression lumineux.

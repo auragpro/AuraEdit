@@ -8,8 +8,8 @@ from pathlib import Path
 from PyQt6.QtCore import QSize, Qt, QThread, QTimer, pyqtSignal
 from PyQt6.QtGui import QIcon, QPixmap
 from PyQt6.QtWidgets import (QDialog, QFileDialog, QHBoxLayout, QInputDialog, QLabel, QListWidget,
-                             QListWidgetItem, QMenu, QMessageBox, QPushButton, QSlider, QStackedWidget,
-                             QVBoxLayout, QWidget)
+                             QListWidgetItem, QMenu, QMessageBox, QPushButton, QSizePolicy, QSlider,
+                             QSplitter, QStackedWidget, QVBoxLayout, QWidget)
 
 from app.core import vclip
 from app.core import project as proj
@@ -131,14 +131,16 @@ class ThumbThread(QThread):
 
 
 class Preview(QLabel):
-    """Image de la vidéo à un instant (mise à jour un peu après le dernier changement)."""
+    """Image de la vidéo à un instant (mise à jour un peu après le dernier changement). S'agrandit avec la page."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedSize(PREV_W, PREV_H)
+        self.setMinimumSize(320, 180)
+        self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.setStyleSheet("background: #0b0f14; border-radius: 10px;")
+        self.setStyleSheet("background: #05080f; border-radius: 12px;")
         self.path, self.t = None, 0.0
+        self._pix = None
         self.timer = QTimer(self)
         self.timer.setSingleShot(True)
         self.timer.timeout.connect(self._load)
@@ -151,10 +153,22 @@ class Preview(QLabel):
         if not self.path:
             return
         pix = QPixmap()
-        pix.loadFromData(tr.grab_png(self.path, self.t, PREV_W))
+        try:
+            pix.loadFromData(tr.grab_png(self.path, self.t, 960))
+        except Exception:
+            return
         if not pix.isNull():
-            self.setPixmap(pix.scaled(PREV_W, PREV_H, Qt.AspectRatioMode.KeepAspectRatio,
-                                      Qt.TransformationMode.SmoothTransformation))
+            self._pix = pix
+            self._fit()
+
+    def _fit(self):
+        if self._pix is not None:
+            self.setPixmap(self._pix.scaled(self.size(), Qt.AspectRatioMode.KeepAspectRatio,
+                                            Qt.TransformationMode.SmoothTransformation))
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        self._fit()
 
 
 class ReproduceDialog(QDialog):
@@ -212,7 +226,7 @@ class ReproduceDialog(QDialog):
         self.b_next.setEnabled(False)
         self.b_next.clicked.connect(self.start_choose)
         left = QVBoxLayout()
-        left.addWidget(self.view)
+        left.addWidget(self.view, 1)
         left.addLayout(srow)
         self.saved_list = QListWidget()
         self.saved_list.setMaximumHeight(150)
@@ -393,12 +407,12 @@ class ReproduceDialog(QDialog):
         self.tl_thread = ThumbThread(self)
         self.tl_thread.got.connect(self._tl_icon)
         self.tl_thread.start()
-        self.grid = QListWidget()
-        self.grid.setViewMode(QListWidget.ViewMode.IconMode)
-        self.grid.setIconSize(QSize(150, 84))
-        self.grid.setGridSize(QSize(170, 120))
-        self.grid.setResizeMode(QListWidget.ResizeMode.Adjust)
-        self.grid.setMovement(QListWidget.Movement.Static)
+        self.grid = QListWidget()                       # liste des couteaux / dash / kunai... (défilante)
+        self.grid.setViewMode(QListWidget.ViewMode.ListMode)
+        self.grid.setIconSize(QSize(128, 72))
+        self.grid.setSpacing(3)
+        self.grid.setWordWrap(True)
+        self.grid.setVerticalScrollMode(QListWidget.ScrollMode.ScrollPerPixel)
         self.grid.itemClicked.connect(self._pick)
         b_prev = QPushButton("←  Plan précédent")
         b_prev.clicked.connect(lambda: self._show_seg(self.seg - 1))
@@ -422,19 +436,45 @@ class ReproduceDialog(QDialog):
                                    "« Mes clips » et dans la partie Dash / Kunai.")
         self.b_addclips.clicked.connect(self.add_clips)
         self.b_go.clicked.connect(self._next_seg)
-        views = QHBoxLayout()
-        lv, rv = QVBoxLayout(), QVBoxLayout()
-        lv.addWidget(QLabel("Le plan dans l'edit"))
-        lv.addWidget(self.seg_view)
-        rv.addWidget(QLabel("Ton clip"))
-        rv.addWidget(self.pick_view)
-        rv.addWidget(self.pick_name)
+        self.b_full = QPushButton("⛶  Plein écran")
+        self.b_full.setObjectName("pill")
+        self.b_full.clicked.connect(self._fullscreen)
+
+        def kick(txt):
+            k = QLabel(txt)
+            k.setObjectName("kicker")
+            return k
+
+        # à gauche : les 2 vidéos (plan de l'edit / ton clip) + timeline
+        left = QWidget()
+        lv = QVBoxLayout(left)
+        lv.setContentsMargins(0, 0, 6, 0)
+        lv.setSpacing(6)
+        lv.addWidget(kick("LE PLAN DANS L'EDIT"))
+        lv.addWidget(self.seg_view, 1)
+        lv.addWidget(kick("TON CLIP"))
+        lv.addWidget(self.pick_view, 1)
+        lv.addWidget(self.pick_name)
         brow = QHBoxLayout()
         brow.addWidget(self.b_remap)
         brow.addWidget(self.b_over)
-        rv.addLayout(brow)
-        views.addLayout(lv)
-        views.addLayout(rv)
+        lv.addLayout(brow)
+        lv.addWidget(kick("TIMELINE DE TES CLIPS — CLIQUE UNE IMAGE POUR ALLER AU PLAN"))
+        lv.addWidget(self.tl)
+        # à droite : la liste des couteaux, dash, kunai... qu'on fait défiler
+        right = QWidget()
+        rv = QVBoxLayout(right)
+        rv.setContentsMargins(6, 0, 0, 0)
+        rv.setSpacing(6)
+        rv.addWidget(kick("TES CLIPS — CLIQUE POUR CHOISIR"))
+        rv.addWidget(self.grid, 1)
+        split = QSplitter(Qt.Orientation.Horizontal)
+        split.addWidget(left)
+        split.addWidget(right)
+        split.setStretchFactor(0, 3)
+        split.setStretchFactor(1, 2)
+        split.setChildrenCollapsible(False)
+
         row = QHBoxLayout()
         row.addWidget(b_prev)
         row.addStretch(1)
@@ -446,14 +486,21 @@ class ReproduceDialog(QDialog):
         trow.addWidget(self.auto_status)
         trow.addWidget(self.b_addclips)
         trow.addWidget(self.b_auto)
+        trow.addWidget(self.b_full)
         lay.addLayout(trow)
         lay.addWidget(info)
-        lay.addLayout(views)
-        lay.addWidget(QLabel("Timeline de tes clips (clique une image pour aller au plan) :"))
-        lay.addWidget(self.tl)
-        lay.addWidget(self.grid, 1)
+        lay.addWidget(split, 1)
         lay.addLayout(row)
         return w
+
+    def _fullscreen(self):
+        win = self.window()
+        if win.isFullScreen():
+            win.showNormal()
+            self.b_full.setText("⛶  Plein écran")
+        else:
+            win.showFullScreen()
+            self.b_full.setText("🗗  Quitter le plein écran")
 
     def _pools(self):
         folders = proj.sync_special_folders(self.project)
@@ -791,9 +838,30 @@ class ReproduceDialog(QDialog):
         else:
             self.finish()
 
+    def build_timeline(self):
+        """Un élément par plan, dans l'ordre (un même clip peut revenir plusieurs fois).
+        Un plan sans clip rallonge le clip d'avant (ou celui d'après au début) : tout reste calé sur la musique."""
+        timeline = []
+        lead = 0.0
+        for k, ch in enumerate(self.choices):
+            if k + 1 >= len(self.bounds):
+                break
+            d = self.bounds[k + 1] - self.bounds[k]
+            if ch and vclip.exists(ch[1]):
+                e = {"clip": ch[1], "duree": round(d + lead, 4), "plan": k}
+                if k in self.overlays:
+                    e["overlay"] = self.overlays[k]
+                timeline.append(e)
+                lead = 0.0
+            elif timeline:
+                timeline[-1]["duree"] = round(timeline[-1]["duree"] + d, 4)
+            else:
+                lead += d
+        return timeline
+
     def finish(self):
-        clips = [c[1] for c in self.choices if c]
-        clips = list(dict.fromkeys(clips))
+        timeline = self.build_timeline()
+        clips = list(dict.fromkeys(e["clip"] for e in timeline))
         saved = tr.clip_remaps()
         plans = {}
         for k, ch in enumerate(self.choices):
@@ -802,7 +870,8 @@ class ReproduceDialog(QDialog):
         for c in clips:
             if c in saved:
                 self.project.remaps[c] = dict(saved[c], plan=plans.get(c))
-        self.project.clips = clips
+        self.project.clips = [e["clip"] for e in timeline]         # dans l'ordre, doublons gardés
+        self.project.timeline = timeline
         self.project.plans = {c: plans[c] for c in clips if plans.get(c)}   # chaque clip dure son plan
         self.project.overlays = {self.choices[k][1]: ov for k, ov in self.overlays.items()
                                  if k < len(self.choices) and self.choices[k]}
