@@ -572,9 +572,51 @@ def _render(path, start, end, cfg, output, is_cancelled=None, progress=None):
     t1, t2 = timing(cfg)
     total = t1 + t2
     n_out = max(2, int(round(total * FPS)) + 1)
-    mode = blend_mode(cfg)
     times = [source_time(min(k / FPS, total), start, end, cfg) for k in range(n_out)]
+    _render_times(path, times, cfg, output, is_cancelled, progress)
+    return total
 
+
+def manual_times(keys, curves, total=None):
+    """Time remap manuel (comme After Effects) : keys = [[temps dans l'edit, temps dans le clip], ...],
+    curves = une courbe (code Flow / cubic-bezier) par passage entre 2 keyframes.
+    Renvoie le temps source de chaque image de sortie (60 i/s)."""
+    keys = sorted((float(a), float(b)) for a, b in keys)
+    if len(keys) < 2:
+        raise ValueError("Il faut au moins 2 keyframes.")
+    if total and keys[-1][0] > 0 and abs(keys[-1][0] - total) > 1e-3:      # calé sur la durée du plan
+        k = total / keys[-1][0]
+        keys = [(a * k, b) for a, b in keys]
+    end = keys[-1][0]
+    n = max(2, int(round(end * FPS)) + 1)
+    out, j = [], 0
+    for i in range(n):
+        t = min(i / FPS, end)
+        while j < len(keys) - 2 and t > keys[j + 1][0]:
+            j += 1
+        (a0, s0), (a1, s1) = keys[j], keys[j + 1]
+        u = 0.0 if a1 <= a0 else (t - a0) / (a1 - a0)
+        c = parse_curve(curves[j] if j < len(curves) else "") or [0.0, 0.0, 1.0, 1.0]
+        out.append(max(0.0, s0 + (s1 - s0) * ease(c, u)))
+    return out
+
+
+def render_manual(path, keys, curves, cfg, output, total=None, is_cancelled=None, progress=None):
+    """Rendu d'un time remap manuel (keyframes + courbes)."""
+    times = manual_times(keys, curves, total)
+    if blend_mode(cfg) == "motion":
+        try:
+            _render_times(path, times, cfg, output, is_cancelled, progress)
+            return
+        except InterruptedError:
+            raise
+        except Exception:                      # noqa: BLE001
+            cfg = dict(cfg, blending_mode="mix")
+    _render_times(path, times, cfg, output, is_cancelled, progress)
+
+
+def _render_times(path, times, cfg, output, is_cancelled=None, progress=None):
+    mode = blend_mode(cfg)
     sfps = source_fps(path)
     # Pixel Motion : on vise ~240 images/s de source pour un ralenti sans saccade
     factor = max(2, min(6, int(round(240 / sfps)))) if mode == "motion" else 1
@@ -646,4 +688,3 @@ def _render(path, start, end, cfg, output, is_cancelled=None, progress=None):
         if enc.wait() != 0:
             err.seek(0)
             raise ValueError(err.read()[-800:].decode("utf-8", "replace"))
-    return total

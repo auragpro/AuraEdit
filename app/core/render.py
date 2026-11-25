@@ -146,7 +146,22 @@ def render(project, output, progress=None, is_cancelled=None, export=None):
                 from . import markers as _mk
                 plan = ((seg_tl[i] or {}).get("duree") or (getattr(project, "plans", None) or {}).get(path)
                         or (remap or {}).get("plan") or _mk.gap_for(project, path))
-            if remap:
+            man = (seg_tl[i] or {}).get("manuel")
+            if man and man.get("keys"):                          # 2K/3K/4K : time remap manuel (keyframes)
+                from . import timeremap
+                try:
+                    mcfg = dict(timeremap.load(), blending_mode=man.get("blending_mode", "motion"))
+                    with remap_slots:
+                        timeremap.render_manual(path, man["keys"], man.get("courbes") or [], mcfg, part, plan,
+                                                is_cancelled,
+                                                (lambda f, txt, i=i: tick(f"Clip {i + 1}/{len(segs)} — {txt}"))
+                                                if progress else None)
+                except InterruptedError:
+                    raise Cancelled()
+                except (ValueError, KeyError, OSError) as e:
+                    raise RenderError(f"Time remap manuel impossible pour {vclip.name(path)} :\n{e}")
+                remap = {"manuel": True}
+            if remap and not remap.get("manuel"):
                 from . import timeremap
                 try:
                     name = vclip.name(path)
@@ -161,6 +176,7 @@ def render(project, output, progress=None, is_cancelled=None, export=None):
                     raise Cancelled()
                 except (ValueError, KeyError, OSError) as e:
                     raise RenderError(f"Time remap impossible pour {vclip.name(path)} :\n{e}")
+            if remap:
                 X = fade_of(i)
                 if X > 0:                                        # fondu : le clip commence X s plus tôt
                     pre = tmp / f"{i:04d}_f.mp4"

@@ -1,3 +1,10 @@
+## Nouveautés de la version 1.3.0
+
+- **2K / 3K / 4K dismiss ou flick away** (Reproduire, étape 2) : le bouton enlève les 2, 3 ou 4 transitions qui suivent le plan (un seul clip pour tout le passage), puis ouvre le **time remap manuel**.
+- **🎛 Time remap manuel** : des keyframes (« à tel moment du plan, telle frame du clip ») et une courbe entre chaque keyframe (code Flow ou préréglages), avec un graphique, comme dans After Effects. Marche aussi pour le reverse.
+- **🎯 Caler sur l'edit / Tout caler** : je regarde la 1re frame de chaque plan de l'edit d'exemple et je la retrouve dans ton clip (même cut) ; si ce n'est pas le même cut, je prends la 1re frame du flick away (trouvée après la bannière de kill). Proposé aussi juste après l'Edit auto.
+- **Edit auto amélioré** : apprend sur plus de clips et plus d'images, et choisit la catégorie (couteau, dash, kunai, dismiss…) par vote des images les plus ressemblantes au lieu d'une seule.
+
 ## Nouveautés de la version 1.2.0
 
 - **Fondu d'opacité à l'endroit que tu veux** (Reproduire, étape 2, « Entrée de ce plan ») : le clip d'après s'allonge de quelques millisecondes et apparaît de 0 à 100 % d'opacité par-dessus le précédent.

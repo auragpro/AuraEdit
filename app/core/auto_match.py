@@ -83,8 +83,8 @@ def _ref_times(clip, rm, special, n):
         a, b = float(rm["debut"]), float(rm["fin"])
         ts = [a, a + 0.1, a + 0.2, a + 0.35, max(a, b - 0.1)]
         return sorted({min(n - 1, max(0, int(t * CLIP_FPS))) for t in ts})
-    lo, hi = (0.15, 0.85) if special else (0.35, 0.97)          # couteau sans time remap : plutôt la fin
-    return sorted({min(n - 1, int(n * (lo + (hi - lo) * k / 5))) for k in range(6)})
+    lo, hi = (0.1, 0.9) if special else (0.35, 0.97)            # couteau sans time remap : plutôt la fin
+    return sorted({min(n - 1, int(n * (lo + (hi - lo) * k / 9))) for k in range(10)})
 
 
 def analyse(edit, bounds, classes, remaps, progress=None, cancelled=None):
@@ -96,7 +96,7 @@ def analyse(edit, bounds, classes, remaps, progress=None, cancelled=None):
             f = _frames(c["image"], file=True)
             if len(f):
                 refs[key] += [desc(f[0])] * 2           # l'image de référence du couteau compte double
-    jobs = [(key, clip) for key, c in classes.items() for clip in c["clips"][:8]]
+    jobs = [(key, clip) for key, c in classes.items() for clip in c["clips"][:16]]     # plus d'exemples appris
     done = 0
     with ThreadPoolExecutor(6) as ex:
         futs = [(key, clip, ex.submit(_frames, clip)) for key, clip in jobs]
@@ -127,9 +127,16 @@ def analyse(edit, bounds, classes, remaps, progress=None, cancelled=None):
             # pour chaque image du plan : la meilleure ressemblance ; puis la moyenne sur le plan
             form[key] = float(np.mean([max(0.8 * s_form(d, r) + 0.2 * s_color(d, r) for r in rl) for d in ds]))
             kn[key] = float(np.mean([max(0.4 * s_form(d, r) + 0.6 * s_color(d, r) for r in rl) for d in ds]))
+        # catégorie : vote des images les plus ressemblantes (k plus proches voisins) sur chaque image du plan,
+        # plus solide qu'un seul maximum (un kunai ne « vole » plus un flick sur une image isolée)
         cats = {}
-        for key, v in form.items():
-            cats[cat[key]] = max(cats.get(cat[key], -1.0), v)
+        for d in ds:
+            sc = sorted(((0.8 * s_form(d, r) + 0.2 * s_color(d, r), key) for key, rl in refs.items() for r in rl),
+                        reverse=True)[:7]
+            for rank, (v, key) in enumerate(sc):
+                cats[cat[key]] = cats.get(cat[key], 0.0) + v * (1.0 - rank * 0.1)
+        for key, v in form.items():                     # + la meilleure ressemblance moyenne (départage)
+            cats[cat[key]] = cats.get(cat[key], 0.0) + 0.5 * max(0.0, v)
         best = max(cats, key=cats.get) if cats else None
         inside = [k for k in classes if cat[k] == best]
         inside.sort(key=lambda k: -(kn[k] if best == FLICK else form[k]))
@@ -138,3 +145,58 @@ def analyse(edit, bounds, classes, remaps, progress=None, cancelled=None):
     if progress:
         progress(1.0, "Terminé")
     return out
+
+
+# ---------------------------------------------------------------- caler le début sur l'edit
+AW, AH = 96, 54
+
+
+def _gray(path, ss=None, dur=None, fps=60):
+    args = vclip.input_args(path, ss=ss) if ss is not None else vclip.input_args(path)
+    if dur is not None:
+        args = [*args, "-t", f"{dur:.3f}"]
+    p = subprocess.run([audio.ffmpeg_exe(), "-hide_banner", "-loglevel", "error", *args, "-an", "-vf",
+                        f"fps={fps},scale={AW}:{AH},format=gray", "-f", "rawvideo", "-"],
+                       capture_output=True, creationflags=audio._NO_WINDOW)
+    n = len(p.stdout) // (AW * AH)
+    a = np.frombuffer(p.stdout[:n * AW * AH], np.uint8).reshape(n, AW * AH).astype(np.float32)
+    a -= a.mean(axis=1, keepdims=True)
+    a /= np.linalg.norm(a, axis=1, keepdims=True) + 1e-6
+    return a
+
+
+def _flick_onset(clip):
+    """1re frame du flick away (le début du gros mouvement de toute l'image), en secondes, ou None."""
+    from . import timeremap as tr
+    try:
+        a = tr.Analysis(clip)
+    except Exception:                       # noqa: BLE001
+        return None
+    fl = a._flicks()
+    if a.kills:                             # le flick qui suit la bannière de kill
+        after = [f for f in fl if f >= a.kills[0] - tr.FPS // 2]
+        fl = after or fl
+    if not fl:
+        try:
+            return a.keyframes()[0]
+        except Exception:                   # noqa: BLE001
+            return None
+    f = fl[0]
+    thr = 0.3 * a.mot[f]
+    j = f
+    while j > 1 and a.mot[j - 1] > thr:
+        j -= 1
+    return j / tr.FPS
+
+
+def align_start(edit, t, clip, same=0.8):
+    """Où commencer le clip pour copier la 1re frame du plan de l'edit (instant t).
+    Même cut retrouvé dans le clip -> (instant, True). Sinon -> (1re frame du flick away, False)."""
+    ref = _gray(edit, ss=max(0.0, t + 2 / 60), dur=0.05)
+    cf = _gray(clip)
+    if len(ref) and len(cf):
+        sc = cf @ ref[0]
+        i = int(np.argmax(sc))
+        if float(sc[i]) >= same:
+            return i / 60.0, True
+    return _flick_onset(clip), False

@@ -13,9 +13,9 @@ from version import __version__
 from .style import RED, asset
 
 WHATS_NEW = [
-    "Fondus d'opacité et shakes coupe par coupe",
-    "Confirmation des shakes avant le rendu",
-    "Reproduire : comparer avec l'edit + voir le résultat"]
+    "2K / 3K / 4K + time remap manuel (keyframes, courbes)",
+    "🎯 Caler le début des clips sur l'edit",
+    "Edit auto qui reconnaît mieux couteaux, dash, kunai"]
 
 
 def ago(ts):

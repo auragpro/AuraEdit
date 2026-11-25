@@ -461,6 +461,24 @@ class ReproduceDialog(QDialog):
         for w_ in (self.fx_fade, self.fx_dur):
             w_.valueChanged.connect(self._fx_changed)
         self.fx_shake.currentIndexChanged.connect(self._fx_changed)
+        # multi-kill : ce plan devient un seul clip 2K / 3K / 4K (on enlève les transitions qui suivent)
+        self.b_multi = []
+        for n in (2, 3, 4):
+            b = QPushButton(f"{n}K")
+            b.setToolTip(f"{n}K dismiss / flick away : j'enlève les {n} transitions qui suivent ce plan "
+                         "(un seul clip pour tout le passage), puis tu fais son time remap manuel.")
+            b.clicked.connect(lambda _=False, n=n: self._multikill(n))
+            self.b_multi.append(b)
+        self.b_man = QPushButton("🎛  Time remap manuel")
+        self.b_man.setToolTip("Keyframes et courbes comme dans After Effects, pour ce plan.")
+        self.b_man.clicked.connect(self._manual)
+        self.b_align = QPushButton("🎯  Caler sur l'edit")
+        self.b_align.setToolTip("Le clip commence sur la même frame que le plan de l'edit (même cut). "
+                                "Sinon : sur la 1re frame du flick away.")
+        self.b_align.clicked.connect(lambda: self.align(False))
+        self.b_align_all = QPushButton("🎯  Tout caler")
+        self.b_align_all.setToolTip("Cale le début de tous les clips choisis sur l'edit.")
+        self.b_align_all.clicked.connect(lambda: self.align(True))
         self.b_cmp = QPushButton("🆚  Comparer avec l'edit")
         self.b_cmp.setToolTip("Aperçu rapide : l'edit d'exemple à gauche, tes clips choisis à droite (sans ralentis), "
                               "avec le son de l'edit.")
@@ -495,6 +513,14 @@ class ReproduceDialog(QDialog):
         frow.addWidget(self.fx_dur)
         frow.addStretch(1)
         lv.addLayout(frow)
+        lv.addWidget(kick("MULTI-KILL · TIME REMAP MANUEL · DÉBUT DU CLIP"))
+        mrow = QHBoxLayout()
+        for b in self.b_multi:
+            mrow.addWidget(b)
+        mrow.addWidget(self.b_man)
+        mrow.addWidget(self.b_align)
+        mrow.addStretch(1)
+        lv.addLayout(mrow)
         lv.addWidget(kick("TIMELINE DE TES CLIPS — CLIQUE UNE IMAGE POUR ALLER AU PLAN"))
         lv.addWidget(self.tl)
         # à droite : la liste des couteaux, dash, kunai... qu'on fait défiler
@@ -522,6 +548,7 @@ class ReproduceDialog(QDialog):
         trow.addWidget(self.auto_status)
         trow.addWidget(self.b_addclips)
         trow.addWidget(self.b_auto)
+        trow.addWidget(self.b_align_all)
         trow.addWidget(self.b_cmp)
         trow.addWidget(self.b_full)
         lay.addLayout(trow)
@@ -725,6 +752,12 @@ class ReproduceDialog(QDialog):
         for w_ in (self.fx_fade, self.fx_shake, self.fx_dur):
             w_.blockSignals(False)
             w_.setEnabled(self.seg > 0 and (w_ is not self.fx_dur or self.fx_shake.currentIndex() > 1))
+        n = fx.get("multi")
+        self.b_man.setText(("🎛  Time remap manuel ✓" if fx.get("manuel") else "🎛  Time remap manuel")
+                           + (f"  ({n}K)" if n else ""))
+        last = len(self.bounds) - 2
+        for b in self.b_multi:
+            b.setEnabled(self.seg < last)
 
     def _fx_changed(self, *_):
         data = self.fx_shake.currentData()
@@ -735,12 +768,114 @@ class ReproduceDialog(QDialog):
         else:
             sh = {"sens": data[0], "niveau": data[1], "duree": self.fx_dur.value()}
         self.fx_dur.setEnabled(self.fx_shake.currentIndex() > 1)
-        fx = {"fondu": self.fx_fade.value(), "shake": sh}
-        if not fx["fondu"] and sh is None:
+        fx = dict(self.fx.get(self.seg) or {})
+        fx.update(fondu=self.fx_fade.value(), shake=sh)
+        if not fx["fondu"] and sh is None and not fx.get("manuel") and not fx.get("multi"):
             self.fx.pop(self.seg, None)
         else:
             self.fx[self.seg] = fx
         self.save_state()
+
+    # ------------------------------------------------------------ 2K / 3K / 4K + time remap manuel
+    def _multikill(self, n):
+        k = self.seg
+        avail = len(self.bounds) - 2 - k                  # transitions après ce plan
+        if avail <= 0:
+            return
+        m = min(n, avail)
+        if QMessageBox.question(
+                self, f"{n}K", f"J'enlève les {m} transition(s) qui suivent ce plan : il devient un seul clip "
+                f"{n}K ({fmt(self.bounds[k])} → {fmt(self.bounds[k + m + 1])}).\n\nEnsuite tu règles son time "
+                "remap manuel (keyframes + courbes). Continuer ?") != QMessageBox.StandardButton.Yes:
+            return
+        cuts = sorted(self.cuts)
+        self.cuts = cuts[:k] + cuts[k + m:]
+
+        def shift(d):
+            return {(i if i <= k else i - m): v for i, v in d.items() if i <= k or i > k + m}
+        self.choices = self.choices[:k + 1] + self.choices[k + 1 + m:]
+        self.overlays = shift(self.overlays)
+        self.fx = shift(self.fx)
+        fx = dict(self.fx.get(k) or {})
+        fx["multi"] = n
+        fx.pop("manuel", None)
+        self.fx[k] = fx
+        self.bounds = [0.0] + sorted(self.cuts) + [self.length]
+        self._fill_cuts()
+        self.save_state()
+        self._fill_timeline()
+        self._show_seg(k)
+        if self.choices[k]:
+            self._manual()
+        else:
+            self.auto_status.setText(f"Choisis le clip {n}K à droite, puis « 🎛 Time remap manuel ».")
+
+    def _manual(self):
+        ch = self.choices[self.seg] if self.seg < len(self.choices) else None
+        if not ch:
+            self.auto_status.setText("Choisis d'abord un clip pour ce plan.")
+            return
+        from .manual_remap_dialog import ManualRemapDialog
+        d = self.bounds[self.seg + 1] - self.bounds[self.seg]
+        fx = dict(self.fx.get(self.seg) or {})
+        rm = tr.clip_remaps().get(ch[1])
+        s0 = tr.clip_starts().get(str(ch[1]))
+        start = float(rm["debut"]) if rm else float(s0 or 0.0)
+        n = fx.get("multi")
+        title = f"{n}K dismiss / flick away — time remap manuel" if n else "Time remap manuel"
+        dlg = ManualRemapDialog(ch[1], d, fx.get("manuel"), start, title, self)
+        if dlg.exec() and dlg.result:
+            fx["manuel"] = dlg.result
+            self.fx[self.seg] = fx
+            self.save_state()
+            self._show_fx()
+
+    # ------------------------------------------------------------ caler le début sur l'edit
+    def align(self, all_plans=False):
+        if not self.path or not getattr(self, "bounds", None):
+            return
+        from app.core import auto_match
+        idx = range(len(self.bounds) - 1) if all_plans else [self.seg]
+        todo = [(k, self.choices[k][1]) for k in idx if k < len(self.choices) and self.choices[k]]
+        if not todo:
+            self.auto_status.setText("Aucun clip choisi à caler.")
+            return
+        edit, bounds = self.path, list(self.bounds)
+
+        def fn(p):
+            res = {}
+            for j, (k, clip) in enumerate(todo):
+                if self._cancel_job:
+                    break
+                p(f"Je cale le début : plan {k + 1} ({j + 1}/{len(todo)})", j / len(todo))
+                if clip not in res:                      # un même clip n'a qu'un seul début
+                    res[clip] = (k,) + tuple(auto_match.align_start(edit, bounds[k], clip))
+            return res
+        r = self._job("Caler les débuts sur l'edit", fn)
+        if "err" in r:
+            QMessageBox.warning(self, "Caler sur l'edit", r["err"][-800:])
+        if "ok" not in r:
+            return
+        same = flick = 0
+        for clip, (k, t, is_same) in r["ok"].items():
+            if t is None:
+                continue
+            same += bool(is_same)
+            flick += not is_same
+            rm = tr.clip_remaps().get(clip)
+            if rm:                                       # time remap : on décale ses 2 keyframes
+                delta = t - float(rm["debut"])
+                rm = dict(rm, debut=round(max(0.0, float(rm["debut"]) + delta), 4),
+                          fin=round(max(0.02, float(rm["fin"]) + delta), 4))
+                tr.save_clip_remap(clip, rm)
+                if clip in self.project.remaps:
+                    self.project.remaps[clip] = dict(self.project.remaps[clip], debut=rm["debut"], fin=rm["fin"])
+            else:
+                tr.save_clip_start(clip, t)
+        self.auto_status.setText(f"✓ Débuts calés : {same} même(s) cut(s) retrouvé(s), "
+                                 f"{flick} sur la 1re frame du flick away.")
+        self._show_pick()
+        self._fill_timeline()
 
     # ------------------------------------------------------------ comparaison
     def _job(self, title, fn):
@@ -974,6 +1109,11 @@ class ReproduceDialog(QDialog):
         self.save_state()
         self._fill_timeline()
         self._show_seg(0)
+        if changed and QMessageBox.question(
+                self, "Edit auto", "Je cale aussi le début de chaque clip sur l'edit ?\n\n"
+                "Je regarde la 1re frame de chaque plan de l'edit et je la retrouve dans ton clip (même cut). "
+                "Si ce n'est pas le même cut, je prends la 1re frame du flick away.") == QMessageBox.StandardButton.Yes:
+            self.align(True)
 
     def _skip(self):
         self.choices[self.seg] = None
@@ -1005,6 +1145,8 @@ class ReproduceDialog(QDialog):
                     e["fondu"] = int(fx["fondu"])
                 if fx.get("shake") is not None:
                     e["shake"] = fx["shake"]
+                if fx.get("manuel"):
+                    e["manuel"] = fx["manuel"]
                 timeline.append(e)
                 lead = 0.0
             elif timeline:
